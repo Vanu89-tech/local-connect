@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, router } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -22,9 +23,13 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    router.dismissAll();
+  const handleLogin = async () => {
+    setLoading(true);
+    await AsyncStorage.setItem("locals_onboarding_seen", "true");
+    setLoading(false);
+    router.replace("/");
   };
 
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -49,7 +54,11 @@ export default function LoginScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Email</Text>
             <View style={[styles.inputWrap, emailFocused && styles.inputFocused]}>
-              <Feather name="mail" size={16} color={emailFocused ? Colors.light.primary : Colors.light.textTertiary} />
+              <Feather
+                name="mail"
+                size={16}
+                color={emailFocused ? Colors.light.primary : Colors.light.textTertiary}
+              />
               <TextInput
                 style={styles.input}
                 placeholder="you@email.com"
@@ -68,7 +77,11 @@ export default function LoginScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Password</Text>
             <View style={[styles.inputWrap, passwordFocused && styles.inputFocused]}>
-              <Feather name="lock" size={16} color={passwordFocused ? Colors.light.primary : Colors.light.textTertiary} />
+              <Feather
+                name="lock"
+                size={16}
+                color={passwordFocused ? Colors.light.primary : Colors.light.textTertiary}
+              />
               <TextInput
                 style={styles.input}
                 placeholder="••••••••"
@@ -80,16 +93,27 @@ export default function LoginScreen() {
                 onBlur={() => setPasswordFocused(false)}
               />
               <Pressable onPress={() => setShowPassword(!showPassword)}>
-                <Feather name={showPassword ? "eye-off" : "eye"} size={16} color={Colors.light.textTertiary} />
+                <Feather
+                  name={showPassword ? "eye-off" : "eye"}
+                  size={16}
+                  color={Colors.light.textTertiary}
+                />
               </Pressable>
             </View>
           </View>
 
           <Pressable
-            style={({ pressed }) => [styles.primaryBtn, { opacity: pressed ? 0.88 : 1 }]}
+            style={({ pressed }) => [
+              styles.primaryBtn,
+              loading && styles.primaryBtnLoading,
+              { opacity: pressed ? 0.88 : 1 },
+            ]}
             onPress={handleLogin}
+            disabled={loading}
           >
-            <Text style={styles.primaryBtnText}>Sign In</Text>
+            <Text style={styles.primaryBtnText}>
+              {loading ? "Signing in..." : "Sign In"}
+            </Text>
           </Pressable>
         </View>
 
@@ -165,6 +189,9 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: "center",
     marginTop: 8,
+  },
+  primaryBtnLoading: {
+    opacity: 0.7,
   },
   primaryBtnText: {
     fontSize: 16,

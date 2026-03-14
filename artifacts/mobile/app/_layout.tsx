@@ -5,8 +5,9 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -21,11 +22,29 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        const seen = await AsyncStorage.getItem("locals_onboarding_seen");
+        if (!seen) {
+          router.replace("/onboarding");
+        }
+      } catch (_) {}
+    };
+    checkOnboarding();
+  }, []);
+
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="(onboarding)" options={{ headerShown: false, presentation: "modal" }} />
-      <Stack.Screen name="(auth)" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen
+        name="onboarding"
+        options={{ headerShown: false, presentation: "fullScreenModal" }}
+      />
+      <Stack.Screen
+        name="(auth)"
+        options={{ headerShown: false, presentation: "modal" }}
+      />
       <Stack.Screen
         name="post/[id]"
         options={{
@@ -39,16 +58,11 @@ function RootLayoutNav() {
       />
       <Stack.Screen
         name="user/[id]"
-        options={{
-          headerShown: false,
-        }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="create-post"
-        options={{
-          presentation: "modal",
-          headerShown: false,
-        }}
+        options={{ presentation: "modal", headerShown: false }}
       />
     </Stack>
   );

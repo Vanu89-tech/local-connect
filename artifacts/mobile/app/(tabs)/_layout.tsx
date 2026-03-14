@@ -1,11 +1,17 @@
 import { BlurView } from "expo-blur";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
-import { Tabs } from "expo-router";
+import { Tabs, router } from "expo-router";
 import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import {
+  Platform,
+  StyleSheet,
+  View,
+  TouchableOpacity,
+  useColorScheme,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
@@ -17,15 +23,29 @@ function NativeTabLayout() {
         <Icon sf={{ default: "house", selected: "house.fill" }} />
         <Label>Home</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="search">
-        <Icon sf={{ default: "magnifyingglass", selected: "magnifyingglass" }} />
-        <Label>Explore</Label>
+      <NativeTabs.Trigger name="create">
+        <Icon sf={{ default: "plus.circle", selected: "plus.circle.fill" }} />
+        <Label>Create</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <Icon sf={{ default: "person", selected: "person.fill" }} />
         <Label>Profile</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
+  );
+}
+
+function CreateTabButton({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      style={styles.createTabBtn}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <View style={styles.createTabInner}>
+        <Feather name="plus" size={22} color="#FFFFFF" />
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -81,15 +101,18 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="search"
+        name="create"
         options={{
-          title: "Explore",
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="magnifyingglass" tintColor={color} size={24} />
-            ) : (
-              <Feather name="search" size={22} color={color} />
-            ),
+          title: "Create",
+          tabBarButton: () => (
+            <CreateTabButton onPress={() => router.push("/create-post")} />
+          ),
+        }}
+        listeners={{
+          tabPress: (e) => {
+            e.preventDefault();
+            router.push("/create-post");
+          },
         }}
       />
       <Tabs.Screen
@@ -114,3 +137,19 @@ export default function TabLayout() {
   }
   return <ClassicTabLayout />;
 }
+
+const styles = StyleSheet.create({
+  createTabBtn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  createTabInner: {
+    width: 46,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Colors.light.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

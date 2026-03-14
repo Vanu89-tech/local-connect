@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, router } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -23,9 +24,13 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleRegister = () => {
-    router.dismissAll();
+  const handleRegister = async () => {
+    setLoading(true);
+    await AsyncStorage.setItem("locals_onboarding_seen", "true");
+    setLoading(false);
+    router.replace("/");
   };
 
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -55,7 +60,11 @@ export default function RegisterScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Full name</Text>
             <View style={inputWrapStyle("name")}>
-              <Feather name="user" size={16} color={focusedField === "name" ? Colors.light.primary : Colors.light.textTertiary} />
+              <Feather
+                name="user"
+                size={16}
+                color={focusedField === "name" ? Colors.light.primary : Colors.light.textTertiary}
+              />
               <TextInput
                 style={styles.input}
                 placeholder="Your name"
@@ -90,7 +99,11 @@ export default function RegisterScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Email</Text>
             <View style={inputWrapStyle("email")}>
-              <Feather name="mail" size={16} color={focusedField === "email" ? Colors.light.primary : Colors.light.textTertiary} />
+              <Feather
+                name="mail"
+                size={16}
+                color={focusedField === "email" ? Colors.light.primary : Colors.light.textTertiary}
+              />
               <TextInput
                 style={styles.input}
                 placeholder="you@email.com"
@@ -109,7 +122,11 @@ export default function RegisterScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Password</Text>
             <View style={inputWrapStyle("password")}>
-              <Feather name="lock" size={16} color={focusedField === "password" ? Colors.light.primary : Colors.light.textTertiary} />
+              <Feather
+                name="lock"
+                size={16}
+                color={focusedField === "password" ? Colors.light.primary : Colors.light.textTertiary}
+              />
               <TextInput
                 style={styles.input}
                 placeholder="Min. 8 characters"
@@ -121,16 +138,27 @@ export default function RegisterScreen() {
                 onBlur={() => setFocusedField(null)}
               />
               <Pressable onPress={() => setShowPassword(!showPassword)}>
-                <Feather name={showPassword ? "eye-off" : "eye"} size={16} color={Colors.light.textTertiary} />
+                <Feather
+                  name={showPassword ? "eye-off" : "eye"}
+                  size={16}
+                  color={Colors.light.textTertiary}
+                />
               </Pressable>
             </View>
           </View>
 
           <Pressable
-            style={({ pressed }) => [styles.primaryBtn, { opacity: pressed ? 0.88 : 1 }]}
+            style={({ pressed }) => [
+              styles.primaryBtn,
+              loading && styles.primaryBtnLoading,
+              { opacity: pressed ? 0.88 : 1 },
+            ]}
             onPress={handleRegister}
+            disabled={loading}
           >
-            <Text style={styles.primaryBtnText}>Create Account</Text>
+            <Text style={styles.primaryBtnText}>
+              {loading ? "Creating account..." : "Create Account"}
+            </Text>
           </Pressable>
 
           <Text style={styles.terms}>
@@ -215,6 +243,9 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: "center",
     marginTop: 4,
+  },
+  primaryBtnLoading: {
+    opacity: 0.7,
   },
   primaryBtnText: {
     fontSize: 16,

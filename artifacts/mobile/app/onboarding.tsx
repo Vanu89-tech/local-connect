@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
 import {
-  Dimensions,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,8 +11,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
-
-const { width } = Dimensions.get("window");
 
 const features = [
   {
@@ -85,7 +82,7 @@ export default function OnboardingScreen() {
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.skipBtn, { opacity: pressed ? 0.7 : 1 }]}
-          onPress={() => router.dismissAll()}
+          onPress={() => router.replace("/")}
         >
           <Text style={styles.skipText}>Explore without account</Text>
         </Pressable>
@@ -111,7 +108,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
-    gap: -8,
   },
   bubble: {
     width: 52,

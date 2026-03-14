@@ -68,7 +68,7 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.onboardBtn, { opacity: pressed ? 0.8 : 1 }]}
-            onPress={() => router.push("/(onboarding)")}
+            onPress={() => router.push("/onboarding")}
           >
             <Feather name="info" size={16} color={Colors.light.text} />
           </Pressable>
