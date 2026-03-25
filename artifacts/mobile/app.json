@@ -14,7 +14,12 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.localconnect.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Locals verwendet deinen Standort, um dir lokale Posts in deiner Nähe zu zeigen. Zuhause bleibt deine genaue Adresse privat.",
+        "NSLocationAlwaysUsageDescription": "Locals verwendet deinen Standort, um dir lokale Posts in deiner Nähe zu zeigen."
+      }
     },
     "android": {},
     "web": {
@@ -28,7 +33,8 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-location"
     ],
     "experiments": {
       "typedRoutes": true,

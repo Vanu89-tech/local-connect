@@ -16,6 +16,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
+import { LocationProvider } from "@/context/LocationContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -28,6 +29,12 @@ function RootLayoutNav() {
         const seen = await AsyncStorage.getItem("locals_onboarding_seen");
         if (!seen) {
           router.replace("/onboarding");
+          return;
+        }
+        // If onboarding seen but location never set up, send to location setup
+        const locData = await AsyncStorage.getItem("locals_location");
+        if (!locData) {
+          router.replace("/location-setup");
         }
       } catch (_) {}
     };
@@ -64,6 +71,10 @@ function RootLayoutNav() {
         name="create-post"
         options={{ presentation: "modal", headerShown: false }}
       />
+      <Stack.Screen
+        name="location-setup"
+        options={{ headerShown: false, presentation: "fullScreenModal" }}
+      />
     </Stack>
   );
 }
@@ -88,13 +99,15 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
-          <AppProvider>
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <KeyboardProvider>
-                <RootLayoutNav />
-              </KeyboardProvider>
-            </GestureHandlerRootView>
-          </AppProvider>
+          <LocationProvider>
+            <AppProvider>
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <KeyboardProvider>
+                  <RootLayoutNav />
+                </KeyboardProvider>
+              </GestureHandlerRootView>
+            </AppProvider>
+          </LocationProvider>
         </QueryClientProvider>
       </ErrorBoundary>
     </SafeAreaProvider>

@@ -70,21 +70,15 @@ export default function OnboardingScreen() {
       <View style={[styles.ctaSection, { paddingBottom: bottomPad + 20 }]}>
         <Pressable
           style={({ pressed }) => [styles.primaryBtn, { opacity: pressed ? 0.88 : 1 }]}
-          onPress={() => router.push("/(auth)/register")}
+          onPress={() => router.replace("/location-setup")}
         >
-          <Text style={styles.primaryBtnText}>Create account</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.secondaryBtn, { opacity: pressed ? 0.7 : 1 }]}
-          onPress={() => router.push("/(auth)/login")}
-        >
-          <Text style={styles.secondaryBtnText}>Sign in</Text>
+          <Text style={styles.primaryBtnText}>Los geht's</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.skipBtn, { opacity: pressed ? 0.7 : 1 }]}
-          onPress={() => router.replace("/")}
+          onPress={() => router.replace("/location-setup")}
         >
-          <Text style={styles.skipText}>Explore without account</Text>
+          <Text style={styles.skipText}>Bereits registriert? Anmelden</Text>
         </Pressable>
       </View>
     </View>
