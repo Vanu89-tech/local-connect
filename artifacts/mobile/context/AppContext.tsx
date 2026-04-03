@@ -41,6 +41,24 @@ export type Comment = {
   createdAt: string;
 };
 
+export type PartyMember = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+};
+
+export type Party = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  hostId: string;
+  hostName: string;
+  members: PartyMember[];
+  createdAt: string;
+};
+
 const SEED_USERS: User[] = [
   {
     id: "u1",
@@ -217,11 +235,13 @@ type AppContextType = {
   currentUser: User;
   posts: Post[];
   comments: Comment[];
+  parties: Party[];
   addPost: (content: string, location: string, imageUrl?: string) => void;
   toggleLike: (postId: string) => void;
   addComment: (postId: string, content: string) => void;
   getCommentsForPost: (postId: string) => Comment[];
   getPostById: (postId: string) => Post | undefined;
+  createParty: (name: string, lat: number, lng: number, members: PartyMember[]) => void;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -231,6 +251,7 @@ const STORAGE_KEY = "localsocial_data";
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [posts, setPosts] = useState<Post[]>(SEED_POSTS);
   const [comments, setComments] = useState<Comment[]>(SEED_COMMENTS);
+  const [parties, setParties] = useState<Party[]>([]);
   const currentUser = ME;
 
   useEffect(() => {
@@ -328,17 +349,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [posts]
   );
 
+  const createParty = useCallback(
+    (name: string, lat: number, lng: number, members: PartyMember[]) => {
+      const newParty: Party = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 6),
+        name,
+        lat,
+        lng,
+        hostId: currentUser.id,
+        hostName: currentUser.name,
+        members,
+        createdAt: new Date().toISOString(),
+      };
+      setParties((prev) => [...prev, newParty]);
+    },
+    [currentUser]
+  );
+
   return (
     <AppContext.Provider
       value={{
         currentUser,
         posts,
         comments,
+        parties,
         addPost,
         toggleLike,
         addComment,
         getCommentsForPost,
         getPostById,
+        createParty,
       }}
     >
       {children}
