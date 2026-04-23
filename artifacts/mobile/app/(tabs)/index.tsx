@@ -18,17 +18,21 @@ import Colors from "@/constants/colors";
 import { Post, useApp } from "@/context/AppContext";
 
 export default function HomeScreen() {
-  const { posts } = useApp();
+  const { posts, refreshPosts } = useApp();
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+    try {
+      await refreshPosts();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshPosts]);
 
   const handleCreatePost = () => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

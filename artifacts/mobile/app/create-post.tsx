@@ -1,9 +1,11 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,16 +19,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
 import Colors from "@/constants/colors";
-import { useApp } from "@/context/AppContext";
+import { PostCategory, useApp } from "@/context/AppContext";
+import { useAuth } from "@/context/AuthContext";
+import { useLocation } from "@/context/LocationContext";
+import { supabase } from "@/lib/supabase";
 
-const SAMPLE_IMAGES = [
-  "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=600&q=80",
-  "https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9?w=600&q=80",
-  "https://images.unsplash.com/photo-1561214115-f2f134cc4912?w=600&q=80",
-  "https://images.unsplash.com/photo-1555441228-c6b67a8081bf?w=600&q=80",
-  "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=600&q=80",
-  "https://images.unsplash.com/photo-1534430480872-3498386e7856?w=600&q=80",
-];
+const POST_IMAGES_BUCKET = "post-images";
 
 const LOCATION_CHIPS = [
   "Brooklyn, NY",
@@ -41,8 +39,44 @@ const LOCATION_CHIPS = [
   "Flushing, Queens",
 ];
 
+const POST_CATEGORIES: { value: PostCategory; label: string; icon: keyof typeof Feather.glyphMap }[] = [
+  { value: "general", label: "Allgemein", icon: "message-circle" },
+  { value: "question", label: "Frage", icon: "help-circle" },
+  { value: "event", label: "Event", icon: "calendar" },
+  { value: "recommendation", label: "Tipp", icon: "star" },
+  { value: "found", label: "Gefunden", icon: "search" },
+  { value: "warning", label: "Warnung", icon: "alert-triangle" },
+  { value: "party", label: "Party", icon: "music" },
+];
+
+function getPostBlockReason(text: string): string | null {
+  const normalized = text.trim();
+  if (normalized.length < 3) return "Schreib mindestens 3 Zeichen.";
+
+  const phonePattern = /(?:\+?\d[\s().-]*){7,}/;
+  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+  const mostlyLinkPattern = /^https?:\/\/\S+$/i;
+
+  if (emailPattern.test(normalized)) {
+    return "Bitte poste keine Email-Adressen. Teile Kontaktdaten erst privat.";
+  }
+
+  if (phonePattern.test(normalized)) {
+    return "Bitte poste keine Telefonnummern. Teile Kontaktdaten erst privat.";
+  }
+
+  if (mostlyLinkPattern.test(normalized)) {
+    return "Nur ein Link reicht nicht. Schreib kurz dazu, warum es lokal relevant ist.";
+  }
+
+  return null;
+}
+
 export default function CreatePostScreen() {
+  const { user } = useAuth();
   const { currentUser, addPost } = useApp();
+  const { currentLocationName, effectivePresenceMode, homeLocation, refreshLocation } =
+    useLocation();
   const insets = useSafeAreaInsets();
   const textRef = useRef<TextInput>(null);
 
@@ -50,35 +84,134 @@ export default function CreatePostScreen() {
   const [location, setLocation] = useState("");
   const [locationQuery, setLocationQuery] = useState("");
   const [locationFocused, setLocationFocused] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<{
+    uri: string;
+    mimeType?: string | null;
+  } | null>(null);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
+  const [category, setCategory] = useState<PostCategory>("general");
+  const [postError, setPostError] = useState<string | null>(null);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
 
-  const canPost = content.trim().length > 0 && location.trim().length > 0;
+  const blockReason = getPostBlockReason(content);
+  const canPost = !blockReason && location.trim().length > 0;
+
+  const myLocationName = currentLocationName ?? homeLocation?.name ?? null;
+  const locationOptions = useMemo(() => {
+    const options = myLocationName
+      ? [myLocationName, ...LOCATION_CHIPS.filter((loc) => loc !== myLocationName)]
+      : LOCATION_CHIPS;
+    return Array.from(new Set(options));
+  }, [myLocationName]);
 
   const filteredChips = locationQuery.length > 0
-    ? LOCATION_CHIPS.filter((l) =>
+    ? locationOptions.filter((l) =>
         l.toLowerCase().includes(locationQuery.toLowerCase())
       )
-    : LOCATION_CHIPS;
+    : locationOptions;
+
+  useEffect(() => {
+    void refreshLocation();
+  }, [refreshLocation]);
+
+  useEffect(() => {
+    if (!myLocationName || location || locationQuery) return;
+    setLocation(myLocationName);
+    setLocationQuery(myLocationName);
+  }, [location, locationQuery, myLocationName]);
+
+  const uploadSelectedImageIfNeeded = async (): Promise<string | undefined> => {
+    if (!selectedImage) return undefined;
+    if (/^https?:\/\//i.test(selectedImage.uri)) return selectedImage.uri;
+    if (!user) return selectedImage.uri;
+
+    const response = await fetch(selectedImage.uri);
+    const blob = await response.blob();
+    const mimeType = selectedImage.mimeType ?? blob.type ?? "image/jpeg";
+    const extension =
+      mimeType === "image/png"
+        ? "png"
+        : mimeType === "image/heic"
+          ? "heic"
+          : mimeType === "image/webp"
+            ? "webp"
+            : "jpg";
+
+    const filePath = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+    const { error } = await supabase.storage.from(POST_IMAGES_BUCKET).upload(filePath, blob, {
+      contentType: mimeType,
+      upsert: false,
+    });
+
+    if (error) {
+      throw new Error(`Foto-Upload fehlgeschlagen: ${error.message}`);
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from(POST_IMAGES_BUCKET)
+      .getPublicUrl(filePath);
+    return publicUrlData.publicUrl;
+  };
 
   const handlePost = async () => {
     if (!canPost || isPosting) return;
     setIsPosting(true);
+    setPostError(null);
     if (Platform.OS !== "web") {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    addPost(content.trim(), location.trim(), selectedImage ?? undefined);
-    router.back();
+    try {
+      const uploadedImageUrl = await uploadSelectedImageIfNeeded();
+      await addPost(content.trim(), location.trim(), uploadedImageUrl, category);
+      router.back();
+    } catch (error) {
+      setPostError(error instanceof Error ? error.message : "Post konnte nicht erstellt werden.");
+    } finally {
+      setIsPosting(false);
+    }
   };
 
-  const handlePickImage = (url: string) => {
+  const handlePickImage = (asset: { uri: string; mimeType?: string | null }) => {
     if (Platform.OS !== "web") Haptics.selectionAsync();
-    setSelectedImage(url);
+    setSelectedImage({ uri: asset.uri, mimeType: asset.mimeType ?? null });
     setShowImagePicker(false);
+  };
+
+  const pickFromLibrary = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Keine Berechtigung", "Bitte erlaube Zugriff auf deine Mediathek.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [4, 3],
+    });
+    if (result.canceled || !result.assets.length) return;
+    handlePickImage(result.assets[0]);
+  };
+
+  const pickFromCamera = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Keine Berechtigung", "Bitte erlaube Zugriff auf die Kamera.");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [4, 3],
+    });
+    if (result.canceled || !result.assets.length) return;
+    handlePickImage(result.assets[0]);
   };
 
   const handleRemoveImage = () => {
@@ -92,6 +225,27 @@ export default function CreatePostScreen() {
     setLocationQuery(loc);
     setLocationFocused(false);
   };
+
+  if (effectivePresenceMode === "home") {
+    return (
+      <View style={[styles.passiveContainer, { paddingTop: topPad + 24 }]}>
+        <View style={styles.passiveIcon}>
+          <Feather name="home" size={34} color={Colors.light.primary} />
+        </View>
+        <Text style={styles.passiveTitle}>Daheim-Modus</Text>
+        <Text style={styles.passiveText}>
+          Du bist gerade passiv unterwegs. Du kannst Posts und Karte ansehen,
+          aber erst im Online-Modus selbst posten.
+        </Text>
+        <Pressable
+          style={({ pressed }) => [styles.passiveButton, { opacity: pressed ? 0.85 : 1 }]}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.passiveButtonText}>Zurück</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -158,7 +312,7 @@ export default function CreatePostScreen() {
             {selectedImage && (
               <View style={styles.imagePreviewWrap}>
                 <Image
-                  source={{ uri: selectedImage }}
+                  source={{ uri: selectedImage.uri }}
                   style={styles.imagePreview}
                   contentFit="cover"
                 />
@@ -173,24 +327,28 @@ export default function CreatePostScreen() {
             {/* Image picker grid */}
             {showImagePicker && (
               <View style={styles.imagePickerWrap}>
-                <Text style={styles.imagePickerLabel}>Choose a photo</Text>
-                <View style={styles.imageGrid}>
-                  {SAMPLE_IMAGES.map((url, i) => (
-                    <Pressable
-                      key={url}
-                      style={({ pressed }) => [
-                        styles.imageGridItem,
-                        { opacity: pressed ? 0.8 : 1 },
-                      ]}
-                      onPress={() => handlePickImage(url)}
-                    >
-                      <Image
-                        source={{ uri: url }}
-                        style={styles.imageGridThumb}
-                        contentFit="cover"
-                      />
-                    </Pressable>
-                  ))}
+                <Text style={styles.imagePickerLabel}>Foto auswählen</Text>
+                <View style={styles.imagePickerActions}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.imagePickerActionBtn,
+                      { opacity: pressed ? 0.8 : 1 },
+                    ]}
+                    onPress={() => void pickFromCamera()}
+                  >
+                    <Feather name="camera" size={16} color={Colors.light.text} />
+                    <Text style={styles.imagePickerActionText}>Kamera</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.imagePickerActionBtn,
+                      { opacity: pressed ? 0.8 : 1 },
+                    ]}
+                    onPress={() => void pickFromLibrary()}
+                  >
+                    <Feather name="image" size={16} color={Colors.light.text} />
+                    <Text style={styles.imagePickerActionText}>Mediathek</Text>
+                  </Pressable>
                 </View>
                 <Pressable
                   style={styles.cancelPickerBtn}
@@ -201,6 +359,60 @@ export default function CreatePostScreen() {
               </View>
             )}
           </View>
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.safetyNotice}>
+          <Feather name="shield" size={16} color={Colors.light.tintBlue} />
+          <Text style={styles.safetyText}>
+            Poste nur lokale, respektvolle Inhalte. Keine Telefonnummern,
+            Email-Adressen oder privaten Daten anderer Personen.
+          </Text>
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.categorySection}>
+          <Text style={styles.categoryTitle}>Kategorie</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.categoryScroll}
+            contentContainerStyle={styles.categoryContent}
+          >
+            {POST_CATEGORIES.map((item) => {
+              const selected = category === item.value;
+              return (
+                <Pressable
+                  key={item.value}
+                  style={({ pressed }) => [
+                    styles.categoryChip,
+                    selected && styles.categoryChipSelected,
+                    { opacity: pressed ? 0.75 : 1 },
+                  ]}
+                  onPress={() => {
+                    if (Platform.OS !== "web") Haptics.selectionAsync();
+                    setCategory(item.value);
+                  }}
+                >
+                  <Feather
+                    name={item.icon}
+                    size={13}
+                    color={selected ? "#FFFFFF" : Colors.light.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      selected && styles.categoryChipTextSelected,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
 
         <View style={styles.divider} />
@@ -273,13 +485,14 @@ export default function CreatePostScreen() {
                 key={loc}
                 style={({ pressed }) => [
                   styles.chip,
+                  loc === myLocationName && styles.myLocationChip,
                   location === loc && styles.chipSelected,
                   { opacity: pressed ? 0.75 : 1 },
                 ]}
                 onPress={() => handleSelectLocation(loc)}
               >
                 <Feather
-                  name="map-pin"
+                  name={loc === myLocationName ? "navigation" : "map-pin"}
                   size={11}
                   color={location === loc ? "#FFFFFF" : Colors.light.textSecondary}
                 />
@@ -289,7 +502,7 @@ export default function CreatePostScreen() {
                     location === loc && styles.chipTextSelected,
                   ]}
                 >
-                  {loc}
+                  {loc === myLocationName ? `Meine Gegend: ${loc}` : loc}
                 </Text>
               </Pressable>
             ))}
@@ -297,6 +510,10 @@ export default function CreatePostScreen() {
         </View>
 
         <View style={styles.divider} />
+
+        {(blockReason || postError) && (
+          <Text style={styles.errorText}>{postError ?? blockReason}</Text>
+        )}
 
         {/* Bottom toolbar */}
         <View style={styles.toolbar}>
@@ -339,9 +556,7 @@ export default function CreatePostScreen() {
               </View>
             ) : (
               <Text style={styles.hintText}>
-                {content.trim().length === 0
-                  ? "Add some text to continue"
-                  : "Pick a location to continue"}
+                {blockReason ?? "Pick a location to continue"}
               </Text>
             )}
           </View>
@@ -355,6 +570,47 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.light.background,
+  },
+  passiveContainer: {
+    flex: 1,
+    backgroundColor: Colors.light.background,
+    paddingHorizontal: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+  },
+  passiveIcon: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.light.backgroundSecondary,
+  },
+  passiveTitle: {
+    fontSize: 26,
+    fontFamily: "Inter_700Bold",
+    color: Colors.light.primary,
+    textAlign: "center",
+  },
+  passiveText: {
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    color: Colors.light.textSecondary,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  passiveButton: {
+    marginTop: 10,
+    backgroundColor: Colors.light.primary,
+    borderRadius: 8,
+    paddingHorizontal: 26,
+    paddingVertical: 13,
+  },
+  passiveButtonText: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFFFFF",
   },
   topBar: {
     flexDirection: "row",
@@ -494,20 +750,26 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     color: Colors.light.text,
   },
-  imageGrid: {
+  imagePickerActions: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
+    gap: 10,
   },
-  imageGridItem: {
-    width: "31%",
-    aspectRatio: 1,
+  imagePickerActionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: Colors.light.card,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
     borderRadius: 10,
-    overflow: "hidden",
+    paddingVertical: 12,
   },
-  imageGridThumb: {
-    width: "100%",
-    height: "100%",
+  imagePickerActionText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.light.text,
   },
   cancelPickerBtn: {
     alignItems: "center",
@@ -524,6 +786,64 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.separator,
     marginHorizontal: 16,
     marginVertical: 14,
+  },
+
+  safetyNotice: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginHorizontal: 16,
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderRadius: 8,
+    padding: 12,
+  },
+  safetyText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.light.textSecondary,
+    lineHeight: 18,
+  },
+
+  // Category
+  categorySection: {
+    gap: 10,
+  },
+  categoryTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.light.text,
+    paddingHorizontal: 16,
+  },
+  categoryScroll: {
+    marginHorizontal: -16,
+  },
+  categoryContent: {
+    paddingHorizontal: 32,
+    gap: 8,
+  },
+  categoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
+  },
+  categoryChipSelected: {
+    backgroundColor: Colors.light.primary,
+    borderColor: Colors.light.primary,
+  },
+  categoryChipText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.light.textSecondary,
+  },
+  categoryChipTextSelected: {
+    color: "#FFFFFF",
   },
 
   // Location
@@ -597,6 +917,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.light.separator,
   },
+  myLocationChip: {
+    borderColor: Colors.light.tintBlue + "66",
+    backgroundColor: Colors.light.tintBlue + "14",
+  },
   chipSelected: {
     backgroundColor: Colors.light.primary,
     borderColor: Colors.light.primary,
@@ -662,5 +986,13 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.light.textTertiary,
     textAlign: "right",
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.light.tint,
+    textAlign: "center",
+    marginHorizontal: 16,
+    lineHeight: 18,
   },
 });

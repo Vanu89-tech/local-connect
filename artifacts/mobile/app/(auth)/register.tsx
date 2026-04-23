@@ -15,9 +15,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
+import { useAuth } from "@/context/AuthContext";
 
 export default function RegisterScreen() {
   const insets = useSafeAreaInsets();
+  const { signUp } = useAuth();
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -25,12 +27,35 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const handleRegister = async () => {
+    if (!name.trim() || !username.trim() || !email.trim() || password.length < 8) {
+      setErrorMessage("Bitte alle Felder ausfüllen. Das Passwort braucht mindestens 8 Zeichen.");
+      setInfoMessage(null);
+      return;
+    }
+
     setLoading(true);
-    await AsyncStorage.setItem("locals_onboarding_seen", "true");
-    setLoading(false);
-    router.replace("/");
+    setErrorMessage(null);
+    setInfoMessage(null);
+
+    try {
+      await signUp({
+        email,
+        password,
+        displayName: name,
+        username,
+      });
+      await AsyncStorage.setItem("locals_onboarding_seen", "true");
+      setInfoMessage("Account erstellt. Wenn Email-Bestaetigung aktiv ist, pruefe bitte dein Postfach.");
+      router.replace("/");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Registrierung fehlgeschlagen.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -164,6 +189,9 @@ export default function RegisterScreen() {
           <Text style={styles.terms}>
             By creating an account, you agree to our Terms of Service and Privacy Policy.
           </Text>
+
+          {errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
+          {infoMessage && <Text style={styles.infoText}>{infoMessage}</Text>}
         </View>
 
         <View style={styles.footer}>
@@ -258,6 +286,20 @@ const styles = StyleSheet.create({
     color: Colors.light.textTertiary,
     textAlign: "center",
     lineHeight: 17,
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.light.tint,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  infoText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#16a34a",
+    textAlign: "center",
+    lineHeight: 18,
   },
   footer: {
     flexDirection: "row",

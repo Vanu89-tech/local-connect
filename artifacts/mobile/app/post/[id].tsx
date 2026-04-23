@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
   Animated,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -20,12 +21,15 @@ import { Avatar } from "@/components/Avatar";
 import { TimeAgo } from "@/components/TimeAgo";
 import Colors from "@/constants/colors";
 import { Comment, useApp } from "@/context/AppContext";
+import { useLocation } from "@/context/LocationContext";
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getPostById, getCommentsForPost, addComment, toggleLike, currentUser } =
     useApp();
+  const { effectivePresenceMode } = useLocation();
   const insets = useSafeAreaInsets();
+  const isPassiveMode = effectivePresenceMode === "home";
 
   const [commentText, setCommentText] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
@@ -39,6 +43,13 @@ export default function PostDetailScreen() {
   const comments = getCommentsForPost(id);
 
   const handleLike = useCallback(() => {
+    if (isPassiveMode) {
+      Alert.alert(
+        "Daheim-Modus aktiv",
+        "Du kannst alles anschauen, bleibst aber passiv und erscheinst offline.",
+      );
+      return;
+    }
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -56,14 +67,21 @@ export default function PostDetailScreen() {
       }),
     ]).start();
     toggleLike(id);
-  }, [id, heartScale, toggleLike]);
+  }, [id, heartScale, isPassiveMode, toggleLike]);
 
   const focusInput = useCallback(() => {
+    if (isPassiveMode) {
+      Alert.alert(
+        "Daheim-Modus aktiv",
+        "Kommentare sind deaktiviert, solange du passiv unterwegs bist.",
+      );
+      return;
+    }
     inputRef.current?.focus();
     setTimeout(() => {
       listRef.current?.scrollToEnd({ animated: true });
     }, 350);
-  }, []);
+  }, [isPassiveMode]);
 
   const handleInputFocus = useCallback(() => {
     setInputFocused(true);
@@ -85,6 +103,13 @@ export default function PostDetailScreen() {
 
   const handleSubmitComment = useCallback(() => {
     if (!commentText.trim()) return;
+    if (isPassiveMode) {
+      Alert.alert(
+        "Daheim-Modus aktiv",
+        "Kommentare sind deaktiviert, solange du passiv unterwegs bist.",
+      );
+      return;
+    }
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -92,7 +117,7 @@ export default function PostDetailScreen() {
     setCommentText("");
     inputRef.current?.blur();
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  }, [id, commentText, addComment]);
+  }, [id, commentText, addComment, isPassiveMode]);
 
   if (!post) {
     return (
@@ -273,10 +298,17 @@ export default function PostDetailScreen() {
           <TextInput
             ref={inputRef}
             style={styles.input}
-            placeholder={inputFocused ? "Add your comment…" : "Add a comment…"}
+            placeholder={
+              isPassiveMode
+                ? "Daheim-Modus: nur lesen"
+                : inputFocused
+                  ? "Add your comment…"
+                  : "Add a comment…"
+            }
             placeholderTextColor={Colors.light.placeholder}
             value={commentText}
             onChangeText={setCommentText}
+            editable={!isPassiveMode}
             multiline
             maxLength={280}
             onFocus={handleInputFocus}

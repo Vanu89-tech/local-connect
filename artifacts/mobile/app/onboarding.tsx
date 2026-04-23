@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React from "react";
 import {
@@ -35,6 +36,11 @@ export default function OnboardingScreen() {
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
 
+  const finishOnboarding = async (nextPath: "/(auth)/login" | "/(auth)/register") => {
+    await AsyncStorage.setItem("locals_onboarding_seen", "true");
+    router.replace(nextPath);
+  };
+
   return (
     <View style={[styles.container, { paddingTop: topPad + 20 }]}>
       <View style={styles.heroSection}>
@@ -70,13 +76,17 @@ export default function OnboardingScreen() {
       <View style={[styles.ctaSection, { paddingBottom: bottomPad + 20 }]}>
         <Pressable
           style={({ pressed }) => [styles.primaryBtn, { opacity: pressed ? 0.88 : 1 }]}
-          onPress={() => router.replace("/location-setup")}
+          onPress={() => {
+            void finishOnboarding("/(auth)/register");
+          }}
         >
           <Text style={styles.primaryBtnText}>Los geht's</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.skipBtn, { opacity: pressed ? 0.7 : 1 }]}
-          onPress={() => router.replace("/location-setup")}
+          onPress={() => {
+            void finishOnboarding("/(auth)/login");
+          }}
         >
           <Text style={styles.skipText}>Bereits registriert? Anmelden</Text>
         </Pressable>

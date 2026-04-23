@@ -1,12 +1,13 @@
 import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import { Image } from "expo-image";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
+  Alert,
+  Animated,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,23 +15,25 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle, Path } from "react-native-svg";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 
 import Colors from "@/constants/colors";
 import { Party, PartyMember, useApp } from "@/context/AppContext";
+import { useAuth } from "@/context/AuthContext";
 import { useLocation } from "@/context/LocationContext";
+import { supabase } from "@/lib/supabase";
 
-// ~200-700m offsets for general active users
-const MOCK_USER_OFFSETS = [
-  { dx: 0.003, dy: 0.002 },
-  { dx: -0.005, dy: 0.001 },
-  { dx: 0.002, dy: -0.004 },
-  { dx: -0.002, dy: -0.003 },
-  { dx: 0.007, dy: 0.003 },
-  { dx: -0.001, dy: 0.006 },
-  { dx: 0.004, dy: -0.007 },
-  { dx: -0.006, dy: 0.004 },
-];
+const MAP_RADIUS_DEGREES = 0.06; // roughly 6-7km
+const MAP_QUERY_LIMIT = 250;
+const MAP_REFRESH_MS = 30000;
+const FRIEND_REFRESH_MS = 90000;
+const PRESENCE_HEARTBEAT_MS = 30000;
+const ONLINE_STALE_MINUTES = 20;
+const LIVE_POI_REFRESH_MS = 5 * 60 * 1000;
+const LIVE_POI_RADIUS_METERS = 1800;
+const LIVE_POI_LIMIT = 180;
+const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 
 // Mock seed parties (relative to home location)
 const MOCK_PARTY_SEEDS = [
@@ -69,26 +72,375 @@ const PARTY_COLORS = {
   circle: "#8B5CF6",
 };
 
+type MapFilterMode = "all" | "people" | "friends" | "dating";
+type MapPresenceMode = "online" | "friend" | "relationship";
+
+type MapUser = {
+  lat: number;
+  lng: number;
+  name: string;
+  id: string;
+  avatarUrl?: string;
+  intent: "active" | "friend" | "relationship";
+};
+
+type LivePoiCategory = "transit" | "school" | "worship" | "food" | "shop" | "green";
+
+type LivePoi = {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string;
+  category: LivePoiCategory;
+  poiType?: string;
+};
+
+type OverpassElement = {
+  id: number;
+  type: "node" | "way" | "relation";
+  lat?: number;
+  lon?: number;
+  center?: { lat: number; lon: number };
+  tags?: Record<string, string>;
+};
+
+function areMapUsersEqual(a: MapUser[], b: MapUser[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.name !== y.name ||
+      x.intent !== y.intent ||
+      Math.abs(x.lat - y.lat) > 0.000001 ||
+      Math.abs(x.lng - y.lng) > 0.000001
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areLivePoisEqual(a: LivePoi[], b: LivePoi[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.name !== y.name ||
+      x.category !== y.category ||
+      x.poiType !== y.poiType ||
+      Math.abs(x.lat - y.lat) > 0.000001 ||
+      Math.abs(x.lng - y.lng) > 0.000001
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const FILTER_OPTIONS: { mode: MapFilterMode; label: string; icon: string }[] = [
+  { mode: "all", label: "Alles", icon: "◎" },
+  { mode: "people", label: "Menschen", icon: "◉" },
+  { mode: "friends", label: "Freunde", icon: "★" },
+  { mode: "dating", label: "Kennenlernen", icon: "♥" },
+];
+
+const PRESENCE_OPTIONS: {
+  mode: MapPresenceMode;
+  label: string;
+  icon: string;
+  color: string;
+  background: string;
+}[] = [
+  { mode: "online", label: "Online", icon: "●", color: "#FF6B6B", background: "#fff1f2" },
+  { mode: "friend", label: "Freunde", icon: "♥", color: "#16a34a", background: "#dcfce7" },
+  { mode: "relationship", label: "Beziehung", icon: "♥", color: "#ef4444", background: "#fee2e2" },
+];
+
+type PresenceRow = {
+  profile_id: string;
+  lat: number | null;
+  lng: number | null;
+  mode: MapPresenceMode;
+  is_online: boolean;
+  last_seen_at: string;
+  profiles:
+    | {
+        id: string;
+        display_name: string;
+        avatar_url: string | null;
+      }
+    | {
+        id: string;
+        display_name: string;
+        avatar_url: string | null;
+      }[]
+    | null;
+};
+
+type FriendshipRow = {
+  requester_id: string;
+  addressee_id: string;
+  status: "pending" | "accepted" | "blocked";
+};
+
+function PartyPopperIcon({ size = 20 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M5.1 5.2h6.7c-.2 2.6-1.6 4.8-3.4 5.6C6.7 10 5.3 7.8 5.1 5.2Z"
+        fill="#FDE68A"
+        stroke="#FFFFFF"
+        strokeLinejoin="round"
+        strokeWidth="1.3"
+        transform="rotate(-22 8.45 8)"
+      />
+      <Path
+        d="M12.2 5.2h6.7c-.2 2.6-1.6 4.8-3.4 5.6-1.7-.8-3.1-3-3.3-5.6Z"
+        fill="#FDE68A"
+        stroke="#FFFFFF"
+        strokeLinejoin="round"
+        strokeWidth="1.3"
+        transform="rotate(22 15.55 8)"
+      />
+      <Path
+        d="M8.4 10.7v6.4M15.6 10.7v6.4M5.9 18.6h5M13.1 18.6h5"
+        stroke="#FFFFFF"
+        strokeLinecap="round"
+        strokeWidth="1.6"
+      />
+      <Path
+        d="M6.2 7.2h4.1M13.7 7.2h4.1"
+        stroke="#FFF7ED"
+        strokeLinecap="round"
+        strokeWidth="1.2"
+      />
+      <Path
+        d="M7.2 3.9 8.5 7.2M16.8 3.9l-1.3 3.3"
+        stroke="#FFFFFF"
+        strokeLinecap="round"
+        strokeWidth="1.2"
+      />
+      <Path
+        d="M11.2 3.8h1.6M12 3v1.6M4.2 4.1l1 .8M19.8 4.1l-1 .8"
+        stroke="#4ECDC4"
+        strokeLinecap="round"
+        strokeWidth="1.5"
+      />
+      <Circle cx="3.8" cy="10.3" fill="#22C55E" r="0.9" />
+      <Circle cx="20.2" cy="10.3" fill="#EF4444" r="0.9" />
+      <Circle cx="5.1" cy="15.3" fill="#4ECDC4" r="0.8" />
+      <Circle cx="18.9" cy="15.3" fill="#FDE047" r="0.8" />
+    </Svg>
+  );
+}
+
+function detectLivePoiCategory(tags: Record<string, string>): LivePoiCategory | null {
+  const amenity = tags.amenity ?? "";
+  const shop = tags.shop ?? "";
+  const publicTransport = tags.public_transport ?? "";
+  const highway = tags.highway ?? "";
+  const railway = tags.railway ?? "";
+
+  if (
+    amenity === "bus_station" ||
+    amenity === "bus_stop" ||
+    publicTransport === "platform" ||
+    highway === "bus_stop" ||
+    railway === "tram_stop" ||
+    railway === "station"
+  ) {
+    return "transit";
+  }
+  if (
+    amenity === "school" ||
+    amenity === "college" ||
+    amenity === "university" ||
+    amenity === "kindergarten"
+  ) {
+    return "school";
+  }
+  if (amenity === "place_of_worship") {
+    return "worship";
+  }
+  if (
+    amenity === "cafe" ||
+    amenity === "restaurant" ||
+    amenity === "bar" ||
+    amenity === "fast_food"
+  ) {
+    return "food";
+  }
+  if (shop) {
+    return "shop";
+  }
+  if (
+    tags.leisure === "park" ||
+    tags.leisure === "garden" ||
+    tags.leisure === "nature_reserve" ||
+    tags.leisure === "recreation_ground" ||
+    tags.landuse === "grass" ||
+    tags.landuse === "meadow" ||
+    tags.landuse === "forest" ||
+    tags.landuse === "village_green" ||
+    tags.natural === "wood"
+  ) {
+    return "green";
+  }
+  return null;
+}
+
+function toLivePoi(element: OverpassElement): LivePoi | null {
+  const tags = element.tags ?? {};
+  const category = detectLivePoiCategory(tags);
+  if (!category) return null;
+
+  const lat = element.lat ?? element.center?.lat;
+  const lng = element.lon ?? element.center?.lon;
+  if (lat == null || lng == null) return null;
+
+  const name =
+    tags.name ||
+    tags["name:en"] ||
+    (category === "shop"
+      ? "Shop"
+      : category === "food"
+        ? "Essen & Trinken"
+        : category === "green"
+          ? "Grünfläche"
+        : category === "worship"
+          ? "Kirche"
+          : category === "school"
+            ? "Schule"
+            : "Haltestelle");
+
+  return {
+    id: `${element.type}-${element.id}`,
+    lat,
+    lng,
+    name,
+    category,
+    poiType:
+      tags.shop ||
+      tags.amenity ||
+      tags.leisure ||
+      tags.landuse ||
+      tags.natural ||
+      tags.public_transport ||
+      tags.highway ||
+      tags.railway ||
+      undefined,
+  };
+}
+
 function buildMapHtml(
   lat: number,
   lng: number,
-  activeUsers: { lat: number; lng: number; name: string; id: string }[],
+  activeUsers: MapUser[],
+  livePois: LivePoi[],
   parties: { id: string; name: string; lat: number; lng: number; hostName: string; members: { id: string; name: string; lat: number; lng: number }[] }[],
-  locationName: string
+  locationName: string,
+  filterMode: MapFilterMode,
+  presenceMode: MapPresenceMode
 ) {
   const usersJson = JSON.stringify(activeUsers);
+  const livePoisJson = JSON.stringify(livePois);
   const partiesJson = JSON.stringify(parties);
+  const filterModeJson = JSON.stringify(filterMode);
+  const presenceModeJson = JSON.stringify(presenceMode);
 
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
   <style>
+    :root {
+      --ink: #152238;
+      --paper: #eaf4ff;
+      --accent: #ff4d8f;
+      --mint: #22c55e;
+      --outline: #152238;
+      --comic-blue: #5dd6ff;
+      --comic-pink: #ff7ab6;
+      --comic-yellow: #ffd84d;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #f0f0f0; }
+    body { background: var(--paper); font-family: "Avenir Next", "Trebuchet MS", "Arial Rounded MT Bold", sans-serif; overflow: hidden; }
     #map { width: 100vw; height: 100vh; }
+    #parchment-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 330;
+      background:
+        radial-gradient(circle at 15% 14%, rgba(93, 214, 255, 0.22) 0%, rgba(93, 214, 255, 0) 34%),
+        radial-gradient(circle at 82% 86%, rgba(255, 122, 182, 0.2) 0%, rgba(255, 122, 182, 0) 36%),
+        radial-gradient(circle at 50% 40%, rgba(255, 216, 77, 0.16) 0%, rgba(255, 216, 77, 0) 40%);
+      mix-blend-mode: screen;
+    }
+    #vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 360;
+      box-shadow: inset 0 0 80px rgba(21, 34, 56, 0.32);
+    }
+    #compass {
+      position: fixed;
+      right: 16px;
+      bottom: 116px;
+      width: 62px;
+      height: 62px;
+      border-radius: 999px;
+      border: 2px solid var(--outline);
+      background:
+        radial-gradient(circle at 30% 28%, #fff8cc 0%, #fff8cc 24%, var(--comic-yellow) 100%);
+      box-shadow: 0 3px 0 rgba(21, 34, 56, 0.35);
+      z-index: 500;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #1d2b45;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+    #compass::before {
+      content: "✦";
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #ff4d8f;
+      font-size: 13px;
+    }
+    .maplibregl-canvas {
+      filter: saturate(1.3) contrast(1.06) hue-rotate(-4deg) brightness(1.03);
+    }
+    .maplibregl-ctrl-group {
+      border: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
+    .maplibregl-ctrl button {
+      border: 2px solid var(--outline) !important;
+      background: linear-gradient(180deg, #ffffff 0%, #d9efff 100%) !important;
+      color: #1d2b45 !important;
+      box-shadow: 0 2px 0 rgba(21, 34, 56, 0.3) !important;
+      border-radius: 8px !important;
+      margin-bottom: 4px !important;
+      width: 34px !important;
+      height: 34px !important;
+    }
+    .maplibregl-ctrl button:hover {
+      background: linear-gradient(180deg, #fff6ff 0%, #d9efff 100%) !important;
+    }
     .pulse { animation: pulse 2s infinite; }
     @keyframes pulse {
       0%   { transform: scale(1);   opacity: 1; }
@@ -101,23 +453,463 @@ function buildMapHtml(
       60%  { box-shadow: 0 0 0 10px rgba(139,92,246,0); }
       100% { box-shadow: 0 0 0 0 rgba(139,92,246,0); }
     }
-    .popup { font-family: -apple-system, sans-serif; font-size: 13px; min-width: 130px; }
-    .popup a  { display: block; color: #1A1A2E; font-weight: 600; cursor: pointer; text-decoration: none; }
-    .popup a:active { color: #FF6B6B; }
-    .popup strong { display: block; color: #1A1A2E; font-weight: 700; font-size: 14px; }
-    .popup span { color: #6B7280; font-size: 11px; margin-top: 2px; display: block; }
-    .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
-    .leaflet-popup-tip-container { display: none; }
+    .popup { font-size: 13px; min-width: 130px; }
+    .popup a  { display: block; color: var(--ink); font-weight: 800; cursor: pointer; text-decoration: none; }
+    .popup a:active { color: var(--accent); }
+    .popup strong { display: block; color: var(--ink); font-weight: 900; font-size: 14px; }
+    .popup span { color: #3d4f6d; font-size: 11px; margin-top: 2px; display: block; font-weight: 700; }
+    .friend-name-tag {
+      padding: 2px 8px;
+      border-radius: 8px;
+      border: 2px solid #152238;
+      background: rgba(255, 251, 235, 0.96);
+      box-shadow: 0 2px 0 rgba(21,34,56,0.25);
+      color: #152238;
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+      margin-bottom: 4px;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+    }
+    .friend-marker-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transform-origin: 50% 100%;
+    }
+    .info-sheet {
+      min-width: 200px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: infoSheetPop 220ms ease-out;
+    }
+    @keyframes infoSheetPop {
+      from { transform: translateY(10px) scale(0.94); opacity: 0; }
+      to   { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .info-sheet-avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      border: 2px solid #152238;
+      background: #dbeafe;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .info-sheet-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      border: 2px solid #152238;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .info-sheet-title {
+      font-size: 14px;
+      font-weight: 900;
+      color: #152238;
+      line-height: 1.1;
+    }
+    .info-sheet-activity {
+      margin-top: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #334155;
+      line-height: 1.2;
+    }
+    .maplibregl-popup-content {
+      border-radius: 8px;
+      box-shadow: 0 6px 0 rgba(21, 34, 56, 0.26);
+      border: 2px solid var(--outline);
+      background: linear-gradient(180deg, #fffbff 0%, #dff4ff 100%);
+      padding: 10px 12px;
+    }
+    .maplibregl-popup-tip { border-top-color: var(--outline) !important; }
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div id="parchment-overlay"></div>
+  <div id="vignette"></div>
+  <div id="compass">N</div>
   <script>
-    var map = L.map('map', { zoomControl: false, attributionControl: false })
-               .setView([${lat}, ${lng}], 15);
+    function postNativeMessage(payload) {
+      try {
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+        }
+      } catch (_) {}
+    }
 
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    window.onerror = function(message, source, line, column) {
+      postNativeMessage({
+        type: 'map_error',
+        message: String(message || 'Unbekannter Kartenfehler'),
+        source: source || null,
+        line: line || null,
+        column: column || null
+      });
+      return false;
+    };
+
+    window.onunhandledrejection = function(event) {
+      var reason = event && event.reason ? String(event.reason) : 'Unbekannte Promise-Ablehnung';
+      postNativeMessage({ type: 'map_error', message: reason });
+    };
+
+    var initialZoom = 15;
+    var baseStyle = {
+      version: 8,
+      sprite: 'https://tiles.openfreemap.org/sprites/ofm_f384/ofm',
+      glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+      sources: {
+        osm: {
+          type: 'raster',
+          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          attribution: '© OpenStreetMap'
+        },
+        openmaptiles: {
+          type: 'vector',
+          url: 'https://tiles.openfreemap.org/planet'
+        }
+      },
+      layers: [
+        { id: 'osm-raster', type: 'raster', source: 'osm' }
+      ]
+    };
+    var markerRefs = [];
+
+    var map = new maplibregl.Map({
+      container: 'map',
+      style: baseStyle,
+      center: [${lng}, ${lat}],
+      zoom: initialZoom,
+      pitch: 0,
+      maxPitch: 60,
+      attributionControl: false
+    });
+    map.dragRotate.disable();
+    map.touchZoomRotate.disableRotation();
+    map.touchPitch.enable();
+    map.doubleClickZoom.disable();
+
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+    function clearMarkers() {
+      markerRefs.forEach(function(marker) {
+        try { marker.remove(); } catch (_) {}
+      });
+      markerRefs = [];
+    }
+
+    function pushMarker(marker) {
+      markerRefs.push(marker);
+      return marker;
+    }
+
+    function resolveVectorSourceName() {
+      var style = map.getStyle();
+      if (!style || !style.sources) return null;
+      var styleSources = style.sources || {};
+      var sourceName = null;
+      ['openmaptiles', 'maplibre', 'composite'].some(function(candidate) {
+        if (styleSources[candidate]) {
+          sourceName = candidate;
+          return true;
+        }
+        return false;
+      });
+      return sourceName;
+    }
+
+    function addComicPoiLayers() {
+      var style = map.getStyle();
+      if (!style || !style.layers) return;
+      var sourceName = resolveVectorSourceName();
+      if (!sourceName) return;
+
+      var labelLayerId = null;
+      for (var i = 0; i < style.layers.length; i += 1) {
+        var layer = style.layers[i];
+        if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+          labelLayerId = layer.id;
+          break;
+        }
+      }
+
+      function addBadgeAndIcon(idPrefix, filterExpr, badgeColor, iconName, iconSize) {
+        var badgeId = idPrefix + '-badge';
+        var iconId = idPrefix + '-icon';
+        var glowId = idPrefix + '-glow';
+
+        if (!map.getLayer(glowId)) {
+          map.addLayer(
+            {
+              id: glowId,
+              type: 'circle',
+              source: sourceName,
+              'source-layer': 'poi',
+              minzoom: 12,
+              filter: filterExpr,
+              paint: {
+                'circle-radius': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  12, 8,
+                  16, 12
+                ],
+                'circle-color': '#ffffff',
+                'circle-opacity': 0.38
+              }
+            },
+            labelLayerId
+          );
+        }
+
+        if (!map.getLayer(badgeId)) {
+          map.addLayer(
+            {
+              id: badgeId,
+              type: 'circle',
+              source: sourceName,
+              'source-layer': 'poi',
+              minzoom: 12,
+              filter: filterExpr,
+              paint: {
+                'circle-radius': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  12, 7,
+                  16, 11
+                ],
+                'circle-color': badgeColor,
+                'circle-stroke-color': '#152238',
+                'circle-stroke-width': 2,
+                'circle-opacity': 0.95
+              }
+            },
+            labelLayerId
+          );
+        }
+
+        if (!map.getLayer(iconId)) {
+          map.addLayer(
+            {
+              id: iconId,
+              type: 'symbol',
+              source: sourceName,
+              'source-layer': 'poi',
+              minzoom: 12,
+              filter: filterExpr,
+              layout: {
+                'icon-image': iconName,
+                'icon-size': [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  12, iconSize * 0.78,
+                  16, iconSize
+                ],
+                'icon-allow-overlap': true,
+                'icon-ignore-placement': true
+              }
+            },
+            labelLayerId
+          );
+        }
+      }
+
+      addBadgeAndIcon(
+        'locals-comic-bus',
+        [
+          'any',
+          ['==', ['get', 'class'], 'bus'],
+          ['==', ['get', 'subclass'], 'bus_stop'],
+          ['==', ['get', 'subclass'], 'tram_stop'],
+          ['==', ['get', 'subclass'], 'bus_station'],
+          ['==', ['get', 'subclass'], 'public_transport']
+        ],
+        '#fde68a',
+        'bus',
+        1.15
+      );
+
+      addBadgeAndIcon(
+        'locals-comic-school',
+        [
+          'any',
+          ['==', ['get', 'class'], 'school'],
+          ['==', ['get', 'subclass'], 'school'],
+          ['==', ['get', 'subclass'], 'kindergarten'],
+          ['==', ['get', 'subclass'], 'university'],
+          ['==', ['get', 'subclass'], 'college']
+        ],
+        '#bfdbfe',
+        'college',
+        1.12
+      );
+
+      addBadgeAndIcon(
+        'locals-comic-church',
+        [
+          'any',
+          ['==', ['get', 'class'], 'place_of_worship'],
+          ['==', ['get', 'subclass'], 'place_of_worship'],
+          ['==', ['get', 'subclass'], 'church']
+        ],
+        '#fecaca',
+        'religious-christian',
+        1.08
+      );
+
+      addBadgeAndIcon(
+        'locals-comic-cafe',
+        [
+          'any',
+          ['==', ['get', 'class'], 'cafe'],
+          ['==', ['get', 'class'], 'restaurant'],
+          ['==', ['get', 'class'], 'bar'],
+          ['==', ['get', 'subclass'], 'cafe'],
+          ['==', ['get', 'subclass'], 'restaurant'],
+          ['==', ['get', 'subclass'], 'fast_food']
+        ],
+        '#fed7aa',
+        'cafe',
+        1.05
+      );
+    }
+
+    function add3DBuildings() {
+      var style = map.getStyle();
+      if (!style || !style.layers) return;
+      var sourceName = resolveVectorSourceName();
+      if (!sourceName) return;
+
+      var labelLayerId = null;
+      for (var i = 0; i < style.layers.length; i += 1) {
+        var layer = style.layers[i];
+        if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+          labelLayerId = layer.id;
+          break;
+        }
+      }
+
+      var extrusionColor = [
+        'interpolate',
+        ['linear'],
+        ['coalesce', ['get', 'render_height'], 0],
+        0, '#a5f3fc',
+        40, '#7dd3fc',
+        120, '#f9a8d4',
+        220, '#fcd34d'
+      ];
+      var extrusionHeight = [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        13, 0,
+        14, ['*', ['coalesce', ['get', 'render_height'], 0], 0.25],
+        15, ['*', ['coalesce', ['get', 'render_height'], 0], 0.55],
+        16, ['coalesce', ['get', 'render_height'], 0]
+      ];
+      var extrusionBase = ['coalesce', ['get', 'render_min_height'], 0];
+      var extrusionOpacity = [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        13, 0.18,
+        15, 0.42,
+        17, 0.62
+      ];
+
+      try {
+        if (map.getLayer('building-3d')) {
+          map.setPaintProperty('building-3d', 'fill-extrusion-color', extrusionColor);
+          map.setPaintProperty('building-3d', 'fill-extrusion-height', extrusionHeight);
+          map.setPaintProperty('building-3d', 'fill-extrusion-base', extrusionBase);
+          map.setPaintProperty('building-3d', 'fill-extrusion-opacity', extrusionOpacity);
+          return;
+        }
+
+        if (!map.getLayer('locals-3d-buildings')) {
+          map.addLayer(
+            {
+              id: 'locals-3d-buildings',
+              type: 'fill-extrusion',
+              source: sourceName,
+              'source-layer': 'building',
+              minzoom: 13,
+              paint: {
+                'fill-extrusion-color': extrusionColor,
+                'fill-extrusion-height': extrusionHeight,
+                'fill-extrusion-base': extrusionBase,
+                'fill-extrusion-opacity': extrusionOpacity
+              }
+            },
+            labelLayerId
+          );
+        }
+      } catch (err) {
+        postNativeMessage({
+          type: 'map_error',
+          message: err && err.message ? err.message : String(err || '3D-Buildings konnten nicht geladen werden')
+        });
+      }
+    }
+
+    var tapCount = 0;
+    var tapTimer = null;
+
+    function isMarkerOrPopupTap(target) {
+      while (target && target !== document) {
+        if (
+          target.classList &&
+          (
+            target.classList.contains('maplibregl-marker') ||
+            target.classList.contains('maplibregl-popup') ||
+            target.classList.contains('maplibregl-ctrl')
+          )
+        ) {
+          return true;
+        }
+        target = target.parentNode;
+      }
+      return false;
+    }
+
+    map.on('click', function(event) {
+      if (event.originalEvent && isMarkerOrPopupTap(event.originalEvent.target)) {
+        return;
+      }
+
+      tapCount += 1;
+
+      if (tapTimer) {
+        clearTimeout(tapTimer);
+      }
+
+      tapTimer = setTimeout(function() {
+        if (tapCount >= 3) {
+          map.easeTo({ center: [event.lngLat.lng, event.lngLat.lat], zoom: initialZoom, duration: 320 });
+        } else if (tapCount === 2) {
+          var nextZoom = Math.min(map.getZoom() + 1, 18);
+          map.easeTo({ center: [event.lngLat.lng, event.lngLat.lat], zoom: nextZoom, duration: 260 });
+        }
+        tapCount = 0;
+        tapTimer = null;
+      }, 260);
+    });
 
     // ── Event delegation ──────────────────────────────────────────────────────
     document.addEventListener('click', function(e) {
@@ -125,132 +917,684 @@ function buildMapHtml(
       while (t && t !== document) {
         if (t.getAttribute && t.getAttribute('data-user-id')) {
           e.preventDefault(); e.stopPropagation();
-          window.ReactNativeWebView.postMessage(
-            JSON.stringify({ type: 'profile', id: t.getAttribute('data-user-id') })
-          );
+          postNativeMessage({ type: 'profile', id: t.getAttribute('data-user-id') });
           return;
         }
         t = t.parentNode;
       }
     }, true);
 
-    // ── Parties ───────────────────────────────────────────────────────────────
-    var parties = ${partiesJson};
+    function popupHtml(title, subtitle, userId) {
+      var link = userId
+        ? '<a data-user-id="' + userId + '">' + title + '</a>'
+        : '<strong>' + title + '</strong>';
+      return '<div class="popup">' + link + '<span>' + subtitle + '</span></div>';
+    }
 
-    parties.forEach(function(party) {
-      // Radius circle
-      L.circle([party.lat, party.lng], {
-        radius: 90,
-        color: '${PARTY_COLORS.circle}',
-        fillColor: '${PARTY_COLORS.fill}',
-        fillOpacity: 0.10,
-        weight: 1.5,
-        dashArray: '6 4',
-        interactive: false,
-      }).addTo(map);
+    function infoSheetHtml(title, subtitle, iconHtml, userId, avatarSrc) {
+      var heading = userId
+        ? '<a data-user-id="' + userId + '" class="info-sheet-title">' + title + '</a>'
+        : '<div class="info-sheet-title">' + title + '</div>';
+      var visual = avatarSrc
+        ? '<img class="info-sheet-avatar" src="' + avatarSrc + '" alt="" />'
+        : '<div class="info-sheet-icon">' + (iconHtml || 'ℹ️') + '</div>';
+      return [
+        '<div class="info-sheet">',
+        visual,
+        '<div>',
+        heading,
+        '<div class="info-sheet-activity">' + subtitle + '</div>',
+        '</div>',
+        '</div>'
+      ].join('');
+    }
 
-      // Member dots (inside the circle)
-      party.members.forEach(function(m) {
-        var mEl = document.createElement('div');
-        mEl.style.cssText = 'width:11px;height:11px;border-radius:50%;background:#22c55e;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.2);';
-        L.marker([m.lat, m.lng], {
-          icon: L.divIcon({ html: mEl, className: '', iconSize: [11, 11], iconAnchor: [5.5, 5.5] }),
-          zIndexOffset: 300
-        }).addTo(map).bindPopup(
-          '<div class="popup"><a data-user-id="' + m.id + '">' + m.name + '</a><span>Party-Mitglied</span></div>',
-          { closeButton: false, offset: [0, -6] }
+    function markerEl(size, background, border, shadow, innerHtml) {
+      var el = document.createElement('div');
+      el.style.cssText = [
+        'width:' + size + 'px',
+        'height:' + size + 'px',
+        'border-radius:50%',
+        'background:' + background,
+        'border:' + border,
+        'box-shadow:' + shadow,
+        'display:flex',
+        'align-items:center',
+        'justify-content:center'
+      ].join(';');
+      if (innerHtml) el.innerHTML = innerHtml;
+      return el;
+    }
+
+    function addLivePoiMarkers() {
+      var pois = ${livePoisJson};
+      if (!Array.isArray(pois) || pois.length === 0) return;
+
+      var styles = {
+        transit: {
+          bg: 'linear-gradient(180deg,#fef9c3 0%,#fde68a 100%)',
+          border: '2px solid #152238',
+          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          icon: '🚌',
+          subtitle: 'Haltestelle'
+        },
+        school: {
+          bg: 'linear-gradient(180deg,#dbeafe 0%,#bfdbfe 100%)',
+          border: '2px solid #152238',
+          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          icon: '🏫',
+          subtitle: 'Schule'
+        },
+        worship: {
+          bg: 'linear-gradient(180deg,#fee2e2 0%,#fecaca 100%)',
+          border: '2px solid #152238',
+          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          icon: '⛪',
+          subtitle: 'Kirche'
+        },
+        food: {
+          bg: 'linear-gradient(180deg,#ffedd5 0%,#fed7aa 100%)',
+          border: '2px solid #152238',
+          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          icon: '🍽️',
+          subtitle: 'Essen & Trinken'
+        },
+        shop: {
+          bg: 'linear-gradient(180deg,#e9d5ff 0%,#d8b4fe 100%)',
+          border: '2px solid #152238',
+          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          icon: '🛍️',
+          subtitle: 'Shop'
+        },
+        green: {
+          bg: 'linear-gradient(180deg,#dcfce7 0%,#86efac 100%)',
+          border: '2px solid #152238',
+          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          icon: '🌳🌲🌳',
+          subtitle: 'Grünfläche'
+        }
+      };
+
+      function resolvePoiVisual(poi, base) {
+        var name = String((poi && poi.name) || '').toLowerCase();
+        var type = String((poi && poi.poiType) || '').toLowerCase();
+        var icon = base.icon;
+        var subtitle = base.subtitle;
+
+        if (poi.category === 'food') {
+          if (type === 'cafe' || /cafe|kaffee|coffee/.test(name)) {
+            icon = '☕';
+            subtitle = 'Café';
+          } else if (type === 'restaurant' || /restaurant|ristorante|wirtshaus/.test(name)) {
+            icon = '🍽️';
+            subtitle = 'Restaurant';
+          } else if (type === 'fast_food' || /burger|pizza|kebab|döner|imbiss/.test(name)) {
+            icon = '🍔';
+            subtitle = 'Fast Food';
+          } else if (type === 'bar' || /bar|pub/.test(name)) {
+            icon = '🍺';
+            subtitle = 'Bar';
+          }
+        } else if (poi.category === 'shop') {
+          if (type === 'supermarket' || /lidl|aldi|edeka|rewe|supermarkt/.test(name)) {
+            icon = '🛒';
+            subtitle = 'Supermarkt';
+          } else if (type === 'convenience' || /kiosk|späti/.test(name)) {
+            icon = '🏪';
+            subtitle = 'Kiosk';
+          } else if (type === 'bakery' || /bäcker|baker/.test(name)) {
+            icon = '🥐';
+            subtitle = 'Bäckerei';
+          } else if (type === 'clothes' || type === 'fashion' || /mode|fashion/.test(name)) {
+            icon = '👕';
+            subtitle = 'Kleidung';
+          } else if (type === 'shoes' || /schuh/.test(name)) {
+            icon = '👟';
+            subtitle = 'Schuhe';
+          } else if (type === 'jewelry' || /juwel|jewel/.test(name)) {
+            icon = '💍';
+            subtitle = 'Schmuck';
+          } else if (type === 'electronics' || /electro|technik/.test(name)) {
+            icon = '💻';
+            subtitle = 'Elektronik';
+          } else if (type === 'books' || /buch|book/.test(name)) {
+            icon = '📚';
+            subtitle = 'Buchladen';
+          } else if (type === 'toy' || /toy|spielzeug/.test(name)) {
+            icon = '🧸';
+            subtitle = 'Spielzeug';
+          } else if (type === 'florist' || /flower|blumen/.test(name)) {
+            icon = '💐';
+            subtitle = 'Blumenladen';
+          } else if (type === 'hairdresser' || /friseur|hair/.test(name)) {
+            icon = '✂️';
+            subtitle = 'Friseur';
+          } else if (type === 'beauty' || /beauty|kosmetik|nail/.test(name)) {
+            icon = '💅';
+            subtitle = 'Beauty';
+          } else if (type === 'pharmacy' || /apotheke|pharma/.test(name)) {
+            icon = '💊';
+            subtitle = 'Apotheke';
+          } else if (type === 'pet' || type === 'pet_grooming' || /pet|hund|tier/.test(name)) {
+            icon = '🐾';
+            subtitle = 'Tierladen';
+          }
+        }
+
+        return {
+          bg: base.bg,
+          border: base.border,
+          shadow: base.shadow,
+          icon: icon,
+          subtitle: subtitle
+        };
+      }
+
+      pois.forEach(function(poi) {
+        if (typeof poi.lat !== 'number' || typeof poi.lng !== 'number') return;
+        var base = styles[poi.category] || styles.shop;
+        var category = resolvePoiVisual(poi, base);
+        var poiEl = markerEl(
+          28,
+          category.bg,
+          category.border,
+          category.shadow,
+          '<span style="font-size:15px; line-height:1;">' + category.icon + '</span>'
         );
+        poiEl.style.cursor = 'pointer';
+
+        pushMarker(new maplibregl.Marker({ element: poiEl, anchor: 'center' })
+          .setLngLat([poi.lng, poi.lat])
+          .setPopup(new maplibregl.Popup({ closeButton: false, offset: 10 }).setHTML(
+            infoSheetHtml(poi.name || 'POI', category.subtitle, category.icon)
+          ))
+          .addTo(map));
+      });
+    }
+
+    function addPartyAndMemberMarkers() {
+      var partyData = ${partiesJson};
+      var activePartyId = null;
+      var partyMemberMarkers = [];
+
+      function updatePartyMemberVisibility() {
+        var zoomOk = map.getZoom() >= 17;
+        partyMemberMarkers.forEach(function(entry) {
+          var show = zoomOk && activePartyId && entry.partyId === activePartyId;
+          if (entry.element) {
+            entry.element.style.display = show ? 'flex' : 'none';
+          }
+        });
+      }
+
+      map.on('zoomend', updatePartyMemberVisibility);
+      map.on('moveend', updatePartyMemberVisibility);
+
+      partyData.forEach(function(party) {
+        var partyEl = markerEl(
+          28,
+          'linear-gradient(180deg,#c4b5fd 0%,${PARTY_COLORS.fill} 100%)',
+          '3px solid #152238',
+          '0 3px 0 rgba(21,34,56,0.35)',
+          '🎉'
+        );
+        partyEl.style.cursor = 'pointer';
+        partyEl.className = 'party-pulse';
+
+        partyEl.addEventListener('click', function() {
+          activePartyId = party.id;
+          map.easeTo({ center: [party.lng, party.lat], zoom: 17.5, duration: 700 });
+          setTimeout(updatePartyMemberVisibility, 720);
+        });
+
+        pushMarker(new maplibregl.Marker({ element: partyEl, anchor: 'center' })
+          .setLngLat([party.lng, party.lat])
+          .setPopup(new maplibregl.Popup({ closeButton: false, offset: 14 }).setHTML(
+            infoSheetHtml(
+              party.name,
+              party.members.length + ' Mitglieder · von ' + party.hostName,
+              '🎉'
+            )
+          ))
+          .addTo(map));
+
+        party.members.forEach(function(m) {
+          var mEl = markerEl(
+            13,
+            'radial-gradient(circle at 35% 30%, #86efac 0%, #22c55e 80%)',
+            '2px solid #152238',
+            '0 2px 0 rgba(21,34,56,0.28)'
+          );
+          mEl.style.display = 'none';
+          pushMarker(new maplibregl.Marker({ element: mEl, anchor: 'center' })
+            .setLngLat([m.lng, m.lat])
+            .setPopup(new maplibregl.Popup({ closeButton: false, offset: 8 }).setHTML(
+              infoSheetHtml(m.name, 'Party-Mitglied', '🧑', m.id)
+            ))
+            .addTo(map));
+          partyMemberMarkers.push({ partyId: party.id, element: mEl });
+        });
       });
 
-      // Party marker (large purple dot)
-      var pEl = document.createElement('div');
-      pEl.style.cssText = [
-        'width:26px', 'height:26px', 'border-radius:50%',
-        'background:${PARTY_COLORS.fill}',
-        'border:3px solid #fff',
-        'box-shadow:0 2px 10px ${PARTY_COLORS.shadow}',
-        'display:flex', 'align-items:center', 'justify-content:center',
-        'font-size:13px', 'cursor:pointer'
-      ].join(';');
-      pEl.className = 'party-pulse';
-      pEl.textContent = '🎉';
+      updatePartyMemberVisibility();
+    }
 
-      L.marker([party.lat, party.lng], {
-        icon: L.divIcon({ html: pEl, className: '', iconSize: [26, 26], iconAnchor: [13, 13] }),
-        zIndexOffset: 600
-      }).addTo(map)
-        .bindPopup(
-          '<div class="popup"><strong>' + party.name + '</strong>' +
-          '<span>' + party.members.length + ' Mitglieder · von ' + party.hostName + '</span></div>',
-          { closeButton: false, offset: [0, -14] }
-        )
-        .on('click', function() {
-          map.flyTo([party.lat, party.lng], 18, { duration: 1.1, easeLinearity: 0.5 });
-        });
+    function addUserMarkers() {
+      var users = ${usersJson};
+      var currentFilter = ${filterModeJson};
+
+      users.forEach(function(u) {
+        var showDatingMarker = currentFilter === 'dating' && u.intent !== 'active';
+        var showFriendMarker = currentFilter === 'friends';
+        var el = null;
+
+        if (showDatingMarker) {
+          var heartColor = u.intent === 'relationship' ? '#ef4444' : '#16a34a';
+          var heartBackground = u.intent === 'relationship' ? '#fee2e2' : '#dcfce7';
+          el = markerEl(
+            28,
+            'linear-gradient(180deg,#fff7ed 0%,' + heartBackground + ' 100%)',
+            '2px solid #152238',
+            '0 3px 0 rgba(21,34,56,0.32)',
+            '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + heartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
+          );
+        } else if (showFriendMarker) {
+          var bubble = markerEl(
+            28,
+            'linear-gradient(180deg,#f0fdf4 0%,#bbf7d0 100%)',
+            '2px solid #152238',
+            '0 3px 0 rgba(21,34,56,0.32)',
+            '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="#16a34a"/><circle cx="16" cy="8" r="3.2" fill="#22c55e"/><path fill="#16a34a" d="M2.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9H3.6c-.5 0-.9-.4-.8-.9z"/><path fill="#22c55e" d="M10.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9h-8.8c-.5 0-.9-.4-.8-.9z"/></svg>'
+          );
+          var wrap = document.createElement('div');
+          wrap.className = 'friend-marker-wrap pulse';
+          var label = document.createElement('div');
+          label.className = 'friend-name-tag';
+          label.textContent = u.name || 'Freund';
+          wrap.appendChild(label);
+          wrap.appendChild(bubble);
+          el = wrap;
+        } else {
+          el = markerEl(
+            15,
+            'radial-gradient(circle at 35% 30%, #86efac 0%, #22c55e 78%)',
+            '2.5px solid #152238',
+            '0 2px 0 rgba(21,34,56,0.25)'
+          );
+        }
+        if (!showFriendMarker) {
+          el.className = 'pulse';
+        }
+
+        var subtitle = showDatingMarker
+          ? (u.intent === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde')
+          : currentFilter === 'friends'
+            ? 'Freund'
+            : 'Gerade aktiv ↗';
+
+        var activityText = u.intent === 'relationship'
+          ? 'Gerade auf Beziehungssuche'
+          : u.intent === 'friend'
+            ? 'Gerade auf Freundesuche'
+            : 'Gerade online unterwegs';
+
+        var avatarSrc = u.avatarUrl
+          ? u.avatarUrl
+          : 'https://api.dicebear.com/9.x/thumbs/png?seed=' + encodeURIComponent(u.id || u.name || 'local');
+        var friendPopupHtml = infoSheetHtml(
+          u.name || 'Freund',
+          activityText,
+          '🧑',
+          u.id,
+          avatarSrc
+        );
+
+        pushMarker(new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([u.lng, u.lat])
+          .setPopup(new maplibregl.Popup({ closeButton: false, offset: 10 }).setHTML(
+            currentFilter === 'friends'
+              ? friendPopupHtml
+              : infoSheetHtml(u.name || 'Local', subtitle, '🧑', u.id, avatarSrc)
+          ))
+          .addTo(map));
+      });
+    }
+
+    function addMyMarker() {
+      var myPresence = ${presenceModeJson};
+      var mePopupText = 'Gerade online';
+      var meEl = null;
+
+      if (myPresence === 'friend' || myPresence === 'relationship') {
+        var meHeartColor = myPresence === 'relationship' ? '#ef4444' : '#16a34a';
+        var meHeartBackground = myPresence === 'relationship' ? '#fee2e2' : '#dcfce7';
+        mePopupText = myPresence === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde';
+        meEl = markerEl(
+          30,
+          'linear-gradient(180deg,#fff7ed 0%,' + meHeartBackground + ' 100%)',
+          '2px solid #152238',
+          '0 3px 0 rgba(21,34,56,0.35)',
+          '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + meHeartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
+        );
+      } else {
+        meEl = markerEl(
+          19,
+          'radial-gradient(circle at 35% 30%, #fca5a5 0%, #ef4444 78%)',
+          '3px solid #152238',
+          '0 3px 0 rgba(21,34,56,0.35)'
+        );
+      }
+
+      var meMarker = pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
+        .setLngLat([${lng}, ${lat}])
+        .setPopup(new maplibregl.Popup({ closeButton: false, offset: 11 }).setHTML(
+          infoSheetHtml('Du', mePopupText, '📍')
+        ))
+        .addTo(map));
+
+      meMarker.togglePopup();
+    }
+
+    function renderMapLayersAndMarkers() {
+      clearMarkers();
+      var currentFilter = ${filterModeJson};
+      var peopleOnly = currentFilter === 'people';
+
+      add3DBuildings();
+      if (!peopleOnly) addLivePoiMarkers();
+      addPartyAndMemberMarkers();
+      addUserMarkers();
+      addMyMarker();
+    }
+
+    map.on('style.load', function() {
+      renderMapLayersAndMarkers();
     });
 
-    // ── General active users ──────────────────────────────────────────────────
-    var users = ${usersJson};
-    users.forEach(function(u) {
-      var el = document.createElement('div');
-      el.style.cssText = 'width:13px;height:13px;border-radius:50%;background:#22c55e;border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.22);';
-      el.className = 'pulse';
-      L.marker([u.lat, u.lng], {
-        icon: L.divIcon({ html: el, className: '', iconSize: [13, 13], iconAnchor: [6.5, 6.5] })
-      }).addTo(map).bindPopup(
-        '<div class="popup"><a data-user-id="' + u.id + '">' + u.name + '</a><span>Gerade aktiv ↗</span></div>',
-        { closeButton: false, offset: [0, -7] }
-      );
+    map.on('error', function(errorEvent) {
+      var msg = errorEvent && errorEvent.error && errorEvent.error.message
+        ? errorEvent.error.message
+        : 'Unbekannter MapLibre-Fehler';
+      postNativeMessage({ type: 'map_error', message: msg });
     });
 
-    // ── Current user ──────────────────────────────────────────────────────────
-    var meEl = document.createElement('div');
-    meEl.style.cssText = 'width:18px;height:18px;border-radius:50%;background:#FF6B6B;border:3px solid #fff;box-shadow:0 2px 8px rgba(255,107,107,0.5);';
-    L.marker([${lat}, ${lng}], {
-      icon: L.divIcon({ html: meEl, className: '', iconSize: [18, 18], iconAnchor: [9, 9] }),
-      zIndexOffset: 1000
-    }).addTo(map)
-      .bindPopup('<div class="popup"><strong>Du</strong><span>${locationName}</span></div>',
-        { closeButton: false, offset: [0, -10] })
-      .openPopup();
   </script>
 </body>
 </html>`;
 }
 
 export default function MapScreen() {
-  const { homeLocation, currentLocationName } = useLocation();
+  const { user } = useAuth();
+  const { homeLocation, currentLocationName, effectivePresenceMode } = useLocation();
   const { posts, parties: storedParties, createParty, currentUser } = useApp();
   const insets = useSafeAreaInsets();
 
-  const [showModal, setShowModal] = useState(false);
+  const [showPartyComposer, setShowPartyComposer] = useState(false);
   const [partyName, setPartyName] = useState("");
+  const [selectedPartyMemberIds, setSelectedPartyMemberIds] = useState<string[]>([]);
+  const [filterMode, setFilterMode] = useState<MapFilterMode>("all");
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [presenceMode, setPresenceMode] = useState<MapPresenceMode>("online");
+  const [presenceMenuOpen, setPresenceMenuOpen] = useState(false);
+  const [activeUsers, setActiveUsers] = useState<MapUser[]>([]);
+  const [livePois, setLivePois] = useState<LivePoi[]>([]);
+  const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
+  const [isMapActive, setIsMapActive] = useState(false);
+  const partyPanelAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<TextInput>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsMapActive(true);
+      return () => setIsMapActive(false);
+    }, []),
+  );
+
+  useEffect(() => {
+    Animated.spring(partyPanelAnim, {
+      toValue: showPartyComposer ? 1 : 0,
+      useNativeDriver: false,
+      damping: 18,
+      stiffness: 180,
+      mass: 0.9,
+    }).start();
+  }, [partyPanelAnim, showPartyComposer]);
 
   const allUsers = useMemo(() => {
     const seen = new Set<string>();
-    const users: { id: string; name: string }[] = [];
+    const users: { id: string; name: string; avatar: string }[] = [];
     posts.forEach((p) => {
       if (!seen.has(p.user.id)) {
         seen.add(p.user.id);
-        users.push({ id: p.user.id, name: p.user.name });
+        users.push({ id: p.user.id, name: p.user.name, avatar: p.user.avatar });
       }
     });
     return users;
   }, [posts]);
 
-  const activeUsers = useMemo(() => {
-    if (!homeLocation) return [];
-    return MOCK_USER_OFFSETS.map((offset, i) => {
-      const u = allUsers[i % allUsers.length];
-      return {
-        lat: homeLocation.lat + offset.dx,
-        lng: homeLocation.lng + offset.dy,
-        name: u?.name ?? `Nutzer ${i + 1}`,
-        id: u?.id ?? `u${i}`,
-      };
+  const upsertOwnPresence = useCallback(async () => {
+    if (!user) return;
+    if (!homeLocation) return;
+
+    const shouldBeOnline = effectivePresenceMode === "online";
+    const { error } = await supabase.from("map_presence").upsert({
+      profile_id: user.id,
+      lat: homeLocation.lat,
+      lng: homeLocation.lng,
+      mode: presenceMode,
+      is_online: shouldBeOnline,
+      last_seen_at: new Date().toISOString(),
     });
-  }, [homeLocation, allUsers]);
+    if (error) {
+      console.warn("map_presence upsert failed", error.message);
+    }
+  }, [effectivePresenceMode, homeLocation, presenceMode, user]);
+
+  const fetchFriendIds = useCallback(async () => {
+    if (!user) {
+      setFriendIds(new Set());
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("friendships")
+      .select("requester_id, addressee_id, status")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`)
+      .returns<FriendshipRow[]>();
+
+    if (error) {
+      console.warn("friendships fetch failed", error.message);
+      return;
+    }
+
+    const ids = new Set<string>();
+    (data ?? []).forEach((row) => {
+      const otherId = row.requester_id === user.id ? row.addressee_id : row.requester_id;
+      if (otherId && otherId !== user.id) ids.add(otherId);
+    });
+    setFriendIds((prev) => {
+      if (prev.size === ids.size) {
+        let same = true;
+        prev.forEach((id) => {
+          if (!ids.has(id)) same = false;
+        });
+        if (same) return prev;
+      }
+      return ids;
+    });
+  }, [user]);
+
+  const fetchActiveUsers = useCallback(async () => {
+    if (!user || !homeLocation) {
+      setActiveUsers([]);
+      return;
+    }
+
+    const now = Date.now();
+    const staleBoundary = new Date(now - ONLINE_STALE_MINUTES * 60 * 1000).toISOString();
+    const latMin = homeLocation.lat - MAP_RADIUS_DEGREES;
+    const latMax = homeLocation.lat + MAP_RADIUS_DEGREES;
+    const lngMin = homeLocation.lng - MAP_RADIUS_DEGREES;
+    const lngMax = homeLocation.lng + MAP_RADIUS_DEGREES;
+
+    const { data, error } = await supabase
+      .from("map_presence")
+      .select(
+        "profile_id, lat, lng, mode, is_online, last_seen_at, profiles!inner(id, display_name, avatar_url)",
+      )
+      .eq("is_online", true)
+      .gte("last_seen_at", staleBoundary)
+      .gte("lat", latMin)
+      .lte("lat", latMax)
+      .gte("lng", lngMin)
+      .lte("lng", lngMax)
+      .order("last_seen_at", { ascending: false })
+      .limit(MAP_QUERY_LIMIT)
+      .returns<PresenceRow[]>();
+
+    if (error) {
+      console.warn("map_presence fetch failed", error.message);
+      return;
+    }
+
+    const mapped: MapUser[] = [];
+    (data ?? []).forEach((row) => {
+      if (!row.is_online || row.lat == null || row.lng == null) return;
+      if (row.profile_id === user.id) return;
+
+      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      mapped.push({
+        id: row.profile_id,
+        lat: row.lat,
+        lng: row.lng,
+        name: profile?.display_name ?? "Local",
+        avatarUrl: profile?.avatar_url ?? undefined,
+        intent: row.mode === "online" ? "active" : row.mode ?? "active",
+      });
+    });
+
+    mapped.sort((a, b) => a.id.localeCompare(b.id));
+    setActiveUsers((prev) => (areMapUsersEqual(prev, mapped) ? prev : mapped));
+  }, [homeLocation, user]);
+
+  const fetchLivePois = useCallback(async () => {
+    if (!homeLocation) {
+      setLivePois([]);
+      return;
+    }
+
+    const query = `[out:json][timeout:25];
+(
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[shop];
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[amenity~"school|university|college|kindergarten|bus_station|bus_stop|place_of_worship|cafe|restaurant|fast_food|bar"];
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[public_transport=platform];
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[highway=bus_stop];
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[railway~"tram_stop|station"];
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[leisure~"park|garden|nature_reserve|recreation_ground"];
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[landuse~"grass|meadow|forest|village_green"];
+  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[natural=wood];
+
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[shop];
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[amenity~"school|university|college|kindergarten|bus_station|place_of_worship|cafe|restaurant|fast_food|bar"];
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[public_transport=platform];
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[highway=bus_stop];
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[railway~"tram_stop|station"];
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[leisure~"park|garden|nature_reserve|recreation_ground"];
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[landuse~"grass|meadow|forest|village_green"];
+  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[natural=wood];
+);
+out center tags ${LIVE_POI_LIMIT};`;
+
+    try {
+      const response = await fetch(OVERPASS_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+
+      if (!response.ok) {
+        console.warn("live poi fetch failed", response.status);
+        return;
+      }
+
+      const payload = (await response.json()) as { elements?: OverpassElement[] };
+      const raw = payload.elements ?? [];
+
+      const seen = new Set<string>();
+      const parsed: LivePoi[] = [];
+      raw.forEach((el) => {
+        const poi = toLivePoi(el);
+        if (!poi) return;
+        const key = `${poi.category}|${poi.name}|${poi.lat.toFixed(5)}|${poi.lng.toFixed(5)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        parsed.push(poi);
+      });
+      const greens = parsed.filter((poi) => poi.category === "green");
+      const nonGreens = parsed.filter((poi) => poi.category !== "green");
+      const next = [...greens, ...nonGreens]
+        .slice(0, LIVE_POI_LIMIT)
+        .sort((a, b) =>
+          `${a.category}|${a.name}|${a.id}`.localeCompare(`${b.category}|${b.name}|${b.id}`),
+        );
+      setLivePois((prev) => (areLivePoisEqual(prev, next) ? prev : next));
+    } catch (error) {
+      console.warn("live poi fetch exception", error);
+    }
+  }, [homeLocation]);
+
+  useEffect(() => {
+    if (!user || !homeLocation || !isMapActive) return;
+    void upsertOwnPresence();
+    const interval = setInterval(() => {
+      void upsertOwnPresence();
+    }, PRESENCE_HEARTBEAT_MS);
+    return () => clearInterval(interval);
+  }, [homeLocation, isMapActive, upsertOwnPresence, user]);
+
+  useEffect(() => {
+    if (!user || !homeLocation || !isMapActive) {
+      setActiveUsers([]);
+      return;
+    }
+
+    void fetchActiveUsers();
+
+    const interval = setInterval(() => {
+      void fetchActiveUsers();
+    }, MAP_REFRESH_MS);
+
+    return () => clearInterval(interval);
+  }, [fetchActiveUsers, homeLocation, isMapActive, user]);
+
+  useEffect(() => {
+    if (!user || !homeLocation || !isMapActive) {
+      setFriendIds(new Set());
+      return;
+    }
+
+    void fetchFriendIds();
+    const interval = setInterval(() => {
+      void fetchFriendIds();
+    }, FRIEND_REFRESH_MS);
+
+    return () => clearInterval(interval);
+  }, [fetchFriendIds, homeLocation, isMapActive, user]);
+
+  useEffect(() => {
+    if (!homeLocation || !isMapActive || filterMode === "people") {
+      setLivePois([]);
+      return;
+    }
+
+    void fetchLivePois();
+    const interval = setInterval(() => {
+      void fetchLivePois();
+    }, LIVE_POI_REFRESH_MS);
+
+    return () => clearInterval(interval);
+  }, [fetchLivePois, filterMode, homeLocation, isMapActive]);
 
   // Combine mock seed parties + user-created parties
   const allParties = useMemo(() => {
@@ -273,58 +1617,107 @@ export default function MapScreen() {
       }),
     }));
 
-    const userParties = storedParties.map((p) => ({
-      id: p.id,
-      name: p.name,
-      lat: p.lat,
-      lng: p.lng,
-      hostName: p.hostName,
-      members: p.members,
-    }));
+    const userParties = storedParties.map((p) => {
+      const hostIsCurrentUser = p.hostId === currentUser.id;
+      const partyLat = hostIsCurrentUser ? homeLocation.lat : p.lat;
+      const partyLng = hostIsCurrentUser ? homeLocation.lng : p.lng;
+      const deltaLat = partyLat - p.lat;
+      const deltaLng = partyLng - p.lng;
+
+      return {
+        id: p.id,
+        name: p.name,
+        lat: partyLat,
+        lng: partyLng,
+        hostName: p.hostName,
+        members: p.members.map((member) => ({
+          ...member,
+          lat: member.lat + deltaLat,
+          lng: member.lng + deltaLng,
+        })),
+      };
+    });
 
     return [...mockParties, ...userParties];
-  }, [homeLocation, allUsers, storedParties]);
+  }, [homeLocation, allUsers, storedParties, currentUser.id]);
+
+  const visibleUsers = useMemo(() => {
+    if (filterMode === "friends") {
+      return activeUsers.filter((u) => friendIds.has(u.id));
+    }
+    if (filterMode === "dating") {
+      return activeUsers.filter((u) => u.intent !== "active");
+    }
+    return activeUsers;
+  }, [activeUsers, filterMode, friendIds]);
+
+  const visibleParties = useMemo(() => allParties, [allParties]);
+
+  const selectedPartyMembers = useMemo(
+    () => allUsers.filter((user) => selectedPartyMemberIds.includes(user.id)),
+    [allUsers, selectedPartyMemberIds]
+  );
+
+  const togglePartyMember = useCallback((id: string) => {
+    setSelectedPartyMemberIds((current) =>
+      current.includes(id)
+        ? current.filter((memberId) => memberId !== id)
+        : [...current, id]
+    );
+  }, []);
 
   const html = useMemo(() => {
     if (!homeLocation) return null;
     return buildMapHtml(
       homeLocation.lat,
       homeLocation.lng,
-      activeUsers,
-      allParties,
-      currentLocationName ?? homeLocation.name
+      visibleUsers,
+      livePois,
+      visibleParties,
+      currentLocationName ?? homeLocation.name,
+      filterMode,
+      presenceMode
     );
-  }, [homeLocation, activeUsers, allParties, currentLocationName]);
+  }, [homeLocation, visibleUsers, livePois, visibleParties, currentLocationName, filterMode, presenceMode]);
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === "profile" && data.id) {
         router.push(`/user/${data.id}`);
+        return;
+      }
+      if (data.type === "map_error") {
+        console.warn("[MapWebView]", data.message ?? "Unbekannter Fehler");
       }
     } catch (_) {}
   }, []);
 
   const handleCreateParty = useCallback(() => {
-    if (!homeLocation || !partyName.trim()) return;
+    if (effectivePresenceMode === "home") {
+      Alert.alert(
+        "Daheim-Modus",
+        "Du bist gerade passiv unterwegs. Wechsle zu Online, um eine Party zu starten.",
+      );
+      return;
+    }
+    if (!homeLocation || !partyName.trim() || selectedPartyMembers.length === 0) return;
 
-    // Place party slightly offset from exact home (so markers don't overlap)
-    const jitter = () => (Math.random() - 0.5) * 0.0006;
-    const partyLat = homeLocation.lat + jitter();
-    const partyLng = homeLocation.lng + jitter();
+    const partyLat = homeLocation.lat;
+    const partyLng = homeLocation.lng;
 
-    // Pick nearby users as members
-    const members: PartyMember[] = activeUsers.slice(0, 4).map((u) => ({
-      id: u.id,
-      name: u.name,
+    const members: PartyMember[] = selectedPartyMembers.map((member) => ({
+      id: member.id,
+      name: member.name,
       lat: partyLat + (Math.random() - 0.5) * 0.0004,
       lng: partyLng + (Math.random() - 0.5) * 0.0004,
     }));
 
     createParty(partyName.trim(), partyLat, partyLng, members);
     setPartyName("");
-    setShowModal(false);
-  }, [homeLocation, partyName, activeUsers, createParty]);
+    setSelectedPartyMemberIds([]);
+    setShowPartyComposer(false);
+  }, [effectivePresenceMode, homeLocation, partyName, selectedPartyMembers, createParty]);
 
   if (!homeLocation || !html) {
     return (
@@ -338,7 +1731,27 @@ export default function MapScreen() {
     );
   }
 
-  const totalParties = allParties.length;
+  const datingCount = activeUsers.filter((u) => u.intent !== "active").length;
+  const friendsCount = activeUsers.filter((u) => friendIds.has(u.id)).length;
+  const selectedFilter =
+    FILTER_OPTIONS.find((option) => option.mode === filterMode) ??
+    FILTER_OPTIONS[0];
+  const selectedPresence =
+    PRESENCE_OPTIONS.find((option) => option.mode === presenceMode) ??
+    PRESENCE_OPTIONS[0];
+  const canCreateParty = partyName.trim().length > 0 && selectedPartyMembers.length > 0;
+  const partyPanelHeight = partyPanelAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [44, 360],
+  });
+  const partyPanelWidth = partyPanelAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [48, 286],
+  });
+  const partyPanelOpacity = partyPanelAnim.interpolate({
+    inputRange: [0, 0.35, 1],
+    outputRange: [0, 0, 1],
+  });
 
   return (
     <View style={styles.container}>
@@ -348,14 +1761,137 @@ export default function MapScreen() {
         <View style={styles.headerRight}>
           <View style={styles.badge}>
             <View style={styles.badgeDot} />
-            <Text style={styles.badgeText}>{activeUsers.length} aktiv</Text>
+            <Text style={styles.badgeText}>{visibleUsers.length} aktiv</Text>
           </View>
-          {totalParties > 0 && (
-            <View style={[styles.badge, styles.partyBadge]}>
-              <Text style={styles.partyBadgeText}>🎉 {totalParties}</Text>
-            </View>
-          )}
         </View>
+      </View>
+
+      <View style={[styles.presenceMenuWrap, { top: insets.top + 58 }]}>
+        <Pressable
+          style={[
+            styles.presenceButton,
+            presenceMenuOpen && styles.presenceButtonActive,
+          ]}
+          onPress={() => {
+            setPresenceMenuOpen((open) => !open);
+            setFilterMenuOpen(false);
+          }}
+        >
+          <Feather
+            name="user"
+            size={17}
+            color={presenceMenuOpen ? selectedPresence.color : Colors.light.text}
+          />
+          <Text
+            style={[
+              styles.presenceButtonIcon,
+              { color: selectedPresence.color },
+            ]}
+          >
+            {selectedPresence.icon}
+          </Text>
+        </Pressable>
+        {presenceMenuOpen && (
+          <View style={styles.presenceDropdown}>
+            {PRESENCE_OPTIONS.map((option) => {
+              const selected = option.mode === presenceMode;
+              return (
+                <Pressable
+                  key={option.mode}
+                  style={[
+                    styles.presenceOption,
+                    selected && { backgroundColor: option.background },
+                  ]}
+                  onPress={() => {
+                    setPresenceMode(option.mode);
+                    setPresenceMenuOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.presenceOptionIcon,
+                      { color: option.color },
+                    ]}
+                  >
+                    {option.icon}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.filterText,
+                      selected && { color: option.color },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      <View style={[styles.filterMenuWrap, { top: insets.top + 58 }]}>
+        <Pressable
+          style={[
+            styles.filterButton,
+            filterMenuOpen && styles.filterButtonActive,
+          ]}
+          onPress={() => {
+            setFilterMenuOpen((open) => !open);
+            setPresenceMenuOpen(false);
+          }}
+        >
+          <Feather
+            name="filter"
+            size={17}
+            color={filterMenuOpen ? "#15803d" : Colors.light.text}
+          />
+          <Text style={styles.filterButtonIcon}>{selectedFilter.icon}</Text>
+        </Pressable>
+        {filterMenuOpen && (
+          <View style={styles.filterDropdown}>
+            {FILTER_OPTIONS.map((option) => {
+              const selected = option.mode === filterMode;
+              const count =
+                option.mode === "dating"
+                  ? datingCount
+                  : option.mode === "friends"
+                    ? friendsCount
+                    : activeUsers.length;
+              return (
+                <Pressable
+                  key={option.mode}
+                  style={[
+                    styles.filterOption,
+                    selected && styles.filterOptionActive,
+                  ]}
+                  onPress={() => {
+                    setFilterMode(option.mode);
+                    setFilterMenuOpen(false);
+                  }}
+                >
+                  <Text style={styles.filterIcon}>{option.icon}</Text>
+                  <Text
+                    style={[
+                      styles.filterText,
+                      selected && styles.filterTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.filterCount,
+                      selected && styles.filterCountActive,
+                    ]}
+                  >
+                    {count}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </View>
 
       {/* Map */}
@@ -376,89 +1912,137 @@ export default function MapScreen() {
         onShouldStartLoadWithRequest={(req) =>
           req.url.startsWith("about:") ||
           req.url.startsWith("blob:") ||
-          req.url.includes("openstreetmap.org") ||
-          req.url.includes("unpkg.com")
+          req.url.startsWith("https://") ||
+          req.url.startsWith("http://")
         }
       />
 
-      {/* Party FAB */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: insets.bottom + 100 }]}
-        onPress={() => setShowModal(true)}
-        activeOpacity={0.85}
+      <Animated.View
+        style={[
+          styles.partyComposer,
+          {
+            bottom: insets.bottom + 100,
+            height: partyPanelHeight,
+            width: partyPanelWidth,
+          },
+        ]}
       >
-        <Text style={styles.fabEmoji}>🎉</Text>
-        <Text style={styles.fabLabel}>Party</Text>
-      </TouchableOpacity>
-
-      {/* Legend */}
-      <View style={[styles.legend, { bottom: insets.bottom + 100 }]}>
-        <View style={styles.legendRow}>
-          <View style={[styles.legendDot, { backgroundColor: "#22c55e" }]} />
-          <Text style={styles.legendText}>Aktiv</Text>
-        </View>
-        <View style={styles.legendRow}>
-          <View style={[styles.legendDot, { backgroundColor: "#8B5CF6" }]} />
-          <Text style={styles.legendText}>Party</Text>
-        </View>
-        <View style={styles.legendRow}>
-          <View style={[styles.legendDot, { backgroundColor: Colors.light.tint }]} />
-          <Text style={styles.legendText}>Du</Text>
-        </View>
-      </View>
-
-      {/* Create Party Modal */}
-      <Modal
-        visible={showModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowModal(false)}
-      >
-        <Pressable style={styles.overlay} onPress={() => setShowModal(false)}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-          >
-            <Pressable>
-              <View style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]}>
-                <View style={styles.sheetHandle} />
-                <Text style={styles.sheetTitle}>🎉 Party erstellen</Text>
-                <Text style={styles.sheetSubtitle}>
-                  Deine Party erscheint als lila Punkt auf der Karte.
-                </Text>
-                <TextInput
-                  ref={inputRef}
-                  style={styles.input}
-                  value={partyName}
-                  onChangeText={setPartyName}
-                  placeholder="Party-Name..."
-                  placeholderTextColor={Colors.light.textTertiary}
-                  maxLength={40}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={handleCreateParty}
-                />
-                <TouchableOpacity
-                  style={[
-                    styles.createBtn,
-                    !partyName.trim() && styles.createBtnDisabled,
-                  ]}
-                  onPress={handleCreateParty}
-                  disabled={!partyName.trim()}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.createBtnText}>Party starten</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.cancelBtn}
-                  onPress={() => setShowModal(false)}
-                >
-                  <Text style={styles.cancelBtnText}>Abbrechen</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </KeyboardAvoidingView>
+        <Pressable
+          style={[
+            styles.partyComposerHeader,
+            !showPartyComposer && styles.partyComposerHeaderClosed,
+          ]}
+          onPress={() => {
+            if (effectivePresenceMode === "home") {
+              Alert.alert(
+                "Daheim-Modus",
+                "Du bist gerade passiv unterwegs. Wechsle zu Online, um eine Party zu starten.",
+              );
+              return;
+            }
+            setShowPartyComposer((open) => !open);
+            setFilterMenuOpen(false);
+            setPresenceMenuOpen(false);
+          }}
+        >
+          <View style={styles.partyComposerTitleWrap}>
+            <PartyPopperIcon size={showPartyComposer ? 18 : 24} />
+            {showPartyComposer && <Text style={styles.fabLabel}>Party</Text>}
+          </View>
+          {showPartyComposer && (
+            <Feather name="chevron-down" size={18} color="#fff" />
+          )}
         </Pressable>
-      </Modal>
+
+        <Animated.View
+          pointerEvents={showPartyComposer ? "auto" : "none"}
+          style={[styles.partyComposerBody, { opacity: partyPanelOpacity }]}
+        >
+          <ScrollView
+            style={styles.partyComposerScroll}
+            contentContainerStyle={styles.partyComposerScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
+            <Text style={styles.partyFieldLabel}>Partyname</Text>
+            <TextInput
+              ref={inputRef}
+              style={styles.partyNameInput}
+              value={partyName}
+              onChangeText={setPartyName}
+              placeholder="z.B. Balkonrunde"
+              placeholderTextColor={Colors.light.textTertiary}
+              maxLength={40}
+              returnKeyType="done"
+              onSubmitEditing={handleCreateParty}
+            />
+
+            <Text style={styles.partyFieldLabel}>Mitglieder</Text>
+            <View style={styles.selectedMembersBox}>
+              {selectedPartyMembers.length > 0 ? (
+                selectedPartyMembers.map((member) => (
+                  <Pressable
+                    key={member.id}
+                    style={styles.selectedMemberRow}
+                    onPress={() => togglePartyMember(member.id)}
+                  >
+                    <Image source={{ uri: member.avatar }} style={styles.partyAvatar} />
+                    <Text style={styles.selectedMemberName}>{member.name}</Text>
+                    <Feather name="x" size={14} color={Colors.light.textTertiary} />
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={styles.selectedMembersEmpty}>Noch niemand dabei</Text>
+              )}
+            </View>
+
+            <Text style={styles.partyFieldLabel}>Mitglieder hinzufügen</Text>
+            <View style={styles.memberPicker}>
+              {allUsers.map((user) => {
+                const selected = selectedPartyMemberIds.includes(user.id);
+                return (
+                  <Pressable
+                    key={user.id}
+                    style={[
+                      styles.memberOption,
+                      selected && styles.memberOptionSelected,
+                    ]}
+                    onPress={() => togglePartyMember(user.id)}
+                  >
+                    <Image source={{ uri: user.avatar }} style={styles.memberOptionAvatar} />
+                    <Text
+                      style={[
+                        styles.memberOptionName,
+                        selected && styles.memberOptionNameSelected,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {user.name}
+                    </Text>
+                    <Feather
+                      name={selected ? "check" : "plus"}
+                      size={14}
+                      color={selected ? "#7C3AED" : Colors.light.textTertiary}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.partyCreateButton,
+                !canCreateParty && styles.createBtnDisabled,
+              ]}
+              onPress={handleCreateParty}
+              disabled={!canCreateParty}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.partyCreateButtonText}>Party starten</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </Animated.View>
+      </Animated.View>
     </View>
   );
 }
@@ -475,28 +2059,176 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingBottom: 12,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.light.separator,
+    backgroundColor: "rgba(255,249,236,0.94)",
+    borderBottomWidth: 2,
+    borderBottomColor: "#17172a",
   },
   headerTitle: {
     fontSize: 20, fontWeight: "700",
-    color: Colors.light.text, letterSpacing: -0.5,
+    color: "#17172a",
   },
   headerRight: { flexDirection: "row", gap: 8 },
 
   badge: {
     flexDirection: "row", alignItems: "center", gap: 5,
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "#dcfce7",
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
+    borderWidth: 2,
+    borderColor: "#17172a",
   },
   badgeDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#22c55e" },
   badgeText: { fontSize: 12, fontWeight: "600", color: "#16a34a" },
 
-  partyBadge: { backgroundColor: "#f5f3ff" },
-  partyBadgeText: { fontSize: 12, fontWeight: "600", color: "#7C3AED" },
-
   map: { flex: 1 },
+
+  presenceMenuWrap: {
+    position: "absolute",
+    left: 12,
+    zIndex: 11,
+    alignItems: "flex-start",
+  },
+  presenceButton: {
+    width: 76,
+    minHeight: 40,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#17172a",
+    backgroundColor: "rgba(255,249,236,0.97)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  presenceButtonActive: {
+    borderColor: "#17172a",
+    backgroundColor: "#ffe4e6",
+  },
+  presenceButtonIcon: {
+    width: 22,
+    fontSize: 16,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  presenceDropdown: {
+    width: 190,
+    marginTop: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#17172a",
+    backgroundColor: "rgba(255,249,236,0.98)",
+    padding: 6,
+    gap: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  presenceOption: {
+    minHeight: 38,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 9,
+  },
+  presenceOptionIcon: {
+    width: 18,
+    fontSize: 15,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+
+  filterMenuWrap: {
+    position: "absolute",
+    right: 12,
+    zIndex: 11,
+    alignItems: "flex-end",
+  },
+  filterButton: {
+    width: 76,
+    minHeight: 40,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#17172a",
+    backgroundColor: "rgba(255,249,236,0.97)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  filterButtonActive: {
+    borderColor: "#17172a",
+    backgroundColor: "#ecfdf5",
+  },
+  filterButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: Colors.light.text,
+  },
+  filterButtonIcon: {
+    width: 22,
+    fontSize: 16,
+    fontWeight: "800",
+    color: Colors.light.text,
+    textAlign: "center",
+  },
+  filterDropdown: {
+    width: 190,
+    marginTop: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#17172a",
+    backgroundColor: "rgba(255,249,236,0.98)",
+    padding: 6,
+    gap: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  filterOption: {
+    minHeight: 38,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 9,
+  },
+  filterOptionActive: {
+    backgroundColor: "#dcfce7",
+  },
+  filterIcon: {
+    fontSize: 14,
+  },
+  filterText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: Colors.light.textSecondary,
+  },
+  filterTextActive: {
+    color: "#15803d",
+  },
+  filterCount: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 6,
+    overflow: "hidden",
+    backgroundColor: "#e5e7eb",
+    color: Colors.light.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  filterCountActive: {
+    backgroundColor: "#86efac",
+    color: "#166534",
+  },
 
   loading: {
     ...StyleSheet.absoluteFillObject,
@@ -504,43 +2236,150 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.background,
   },
 
-  fab: {
+  partyComposer: {
     position: "absolute",
     left: 16,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,249,236,0.98)",
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "#17172a",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 12,
+  },
+  partyComposerHeader: {
+    height: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#7c3aed",
+    paddingHorizontal: 14,
+    borderBottomWidth: 2,
+    borderBottomColor: "#17172a",
+  },
+  partyComposerHeaderClosed: {
+    justifyContent: "center",
+    paddingHorizontal: 0,
+  },
+  partyComposerTitleWrap: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#8B5CF6",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 24,
-    shadowColor: "#8B5CF6",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
-    zIndex: 10,
   },
-  fabEmoji: { fontSize: 16 },
   fabLabel: { fontSize: 14, fontWeight: "700", color: "#fff" },
-
-  legend: {
-    position: "absolute",
-    right: 16,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: 12,
-    paddingHorizontal: 12, paddingVertical: 8,
-    gap: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1, shadowRadius: 6,
-    elevation: 3,
-    zIndex: 10,
+  partyComposerBody: {
+    flex: 1,
   },
-  legendRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendText: { fontSize: 12, color: Colors.light.textSecondary, fontWeight: "500" },
-
+  partyComposerScroll: {
+    flex: 1,
+  },
+  partyComposerScrollContent: {
+    padding: 12,
+    gap: 8,
+    paddingBottom: 14,
+  },
+  partyFieldLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: Colors.light.textSecondary,
+    textTransform: "uppercase",
+  },
+  partyNameInput: {
+    height: 40,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: Colors.light.text,
+    backgroundColor: Colors.light.backgroundSecondary,
+  },
+  selectedMembersBox: {
+    minHeight: 42,
+    gap: 6,
+  },
+  selectedMemberRow: {
+    minHeight: 38,
+    borderRadius: 8,
+    backgroundColor: Colors.light.backgroundSecondary,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingHorizontal: 8,
+  },
+  partyAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: Colors.light.backgroundTertiary,
+  },
+  selectedMemberName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: Colors.light.text,
+  },
+  selectedMembersEmpty: {
+    minHeight: 38,
+    borderRadius: 8,
+    backgroundColor: Colors.light.backgroundSecondary,
+    color: Colors.light.textTertiary,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 38,
+    paddingHorizontal: 10,
+  },
+  memberPicker: {
+    gap: 6,
+  },
+  memberOption: {
+    minHeight: 32,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
+    backgroundColor: Colors.light.background,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 8,
+  },
+  memberOptionSelected: {
+    borderColor: "#8B5CF6",
+    backgroundColor: "#f5f3ff",
+  },
+  memberOptionAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 8,
+    backgroundColor: Colors.light.backgroundTertiary,
+  },
+  memberOptionName: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: Colors.light.textSecondary,
+  },
+  memberOptionNameSelected: {
+    color: "#7C3AED",
+  },
+  partyCreateButton: {
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: "#7c3aed",
+    borderWidth: 2,
+    borderColor: "#17172a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  partyCreateButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.35)",
@@ -572,7 +2411,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16, paddingVertical: 13,
     fontSize: 16, color: Colors.light.text,
-    backgroundColor: Colors.light.secondaryBackground,
+    backgroundColor: Colors.light.backgroundSecondary,
   },
   createBtn: {
     backgroundColor: "#8B5CF6",

@@ -5,24 +5,32 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 
 export type HomeLocation = {
   name: string;
+  address?: string;
   lat: number;
   lng: number;
 };
 
 export type LocationMode = "live" | "home" | "pending";
+export type AppPresenceMode = "online" | "home";
 
 type LocationContextType = {
   locationMode: LocationMode;
+  appPresenceMode: AppPresenceMode;
+  effectivePresenceMode: AppPresenceMode;
   currentLocationName: string | null;
   homeLocation: HomeLocation | null;
   gpsGranted: boolean;
   hasCompletedSetup: boolean;
+  hasSelectedStartMode: boolean;
   setHomeLocation: (loc: HomeLocation) => Promise<void>;
+  chooseStartMode: (mode: AppPresenceMode) => Promise<AppPresenceMode>;
   requestGpsPermission: () => Promise<boolean>;
   refreshLocation: () => Promise<void>;
 };
@@ -45,14 +53,30 @@ function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) 
 }
 
 export function LocationProvider({ children }: { children: React.ReactNode }) {
+  const appState = useRef<AppStateStatus>(AppState.currentState);
   const [homeLocation, setHomeLocationState] = useState<HomeLocation | null>(null);
   const [locationMode, setLocationMode] = useState<LocationMode>("pending");
+  const [appPresenceMode, setAppPresenceMode] = useState<AppPresenceMode>("home");
+  const [hasSelectedStartMode, setHasSelectedStartMode] = useState(false);
   const [currentLocationName, setCurrentLocationName] = useState<string | null>(null);
   const [gpsGranted, setGpsGranted] = useState(false);
   const [hasCompletedSetup, setHasCompletedSetup] = useState(false);
 
   useEffect(() => {
     loadSaved();
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const wasInBackground =
+        appState.current === "background" || appState.current === "inactive";
+      if (wasInBackground && nextState === "active") {
+        setHasSelectedStartMode(false);
+      }
+      appState.current = nextState;
+    });
+
+    return () => subscription.remove();
   }, []);
 
   const detectCurrentLocation = useCallback(
@@ -67,9 +91,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         if (home) {
           const dist = distanceMeters(latitude, longitude, home.lat, home.lng);
           if (dist <= HOME_RADIUS_METERS) {
-            setCurrentLocationName(home.name);
+            setCurrentLocationName(home.name || "Daheim");
             setLocationMode("home");
-            return;
+            return "home" as LocationMode;
           }
         }
 
@@ -80,12 +104,15 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           .join(", ");
         setCurrentLocationName(name || place.city || "Nearby");
         setLocationMode("live");
+        return "live" as LocationMode;
       } catch (_) {
         if (home) {
-          setCurrentLocationName(home.name);
+          setCurrentLocationName(home.name || "Daheim");
           setLocationMode("home");
+          return "home" as LocationMode;
         }
       }
+      return "pending" as LocationMode;
     },
     []
   );
@@ -104,7 +131,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           await detectCurrentLocation(data.homeLocation);
         } else {
           // No GPS permission → fall back to home location
-          setCurrentLocationName(data.homeLocation.name);
+          setCurrentLocationName(data.homeLocation.name || "Daheim");
           setLocationMode("home");
         }
       }
@@ -124,7 +151,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ homeLocation: loc }));
     const { status } = await Location.getForegroundPermissionsAsync();
     if (status !== "granted") {
-      setCurrentLocationName(loc.name);
+      setCurrentLocationName(loc.name || "Daheim");
       setLocationMode("home");
     }
   }, []);
@@ -135,15 +162,37 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
   }, [gpsGranted, homeLocation, detectCurrentLocation]);
 
+  const chooseStartMode = useCallback(
+    async (mode: AppPresenceMode) => {
+      let nextLocationMode = locationMode;
+      if (gpsGranted) {
+        nextLocationMode = await detectCurrentLocation(homeLocation);
+      }
+
+      setHasSelectedStartMode(true);
+      const nextMode = nextLocationMode === "home" ? "home" : mode;
+      setAppPresenceMode(nextMode);
+      return nextMode;
+    },
+    [detectCurrentLocation, gpsGranted, homeLocation, locationMode],
+  );
+
+  const effectivePresenceMode: AppPresenceMode =
+    locationMode === "home" ? "home" : appPresenceMode;
+
   return (
     <LocationContext.Provider
       value={{
         locationMode,
+        appPresenceMode,
+        effectivePresenceMode,
         currentLocationName,
         homeLocation,
         gpsGranted,
         hasCompletedSetup,
+        hasSelectedStartMode,
         setHomeLocation,
+        chooseStartMode,
         requestGpsPermission,
         refreshLocation,
       }}

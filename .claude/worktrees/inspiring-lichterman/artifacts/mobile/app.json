@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Local Social",
+    "slug": "mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "mobile",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.localconnect.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Locals verwendet deinen Standort, um dir lokale Posts in deiner Nähe zu zeigen. Zuhause bleibt deine genaue Adresse privat.",
+        "NSLocationAlwaysUsageDescription": "Locals verwendet deinen Standort, um dir lokale Posts in deiner Nähe zu zeigen."
+      }
+    },
+    "android": {},
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-location"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

@@ -7,6 +7,9 @@ import React, {
   useState,
 } from "react";
 
+import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/lib/supabase";
+
 export type User = {
   id: string;
   name: string;
@@ -29,8 +32,31 @@ export type Post = {
   likesCount: number;
   commentsCount: number;
   liked: boolean;
+  category: PostCategory;
+  status: PostStatus;
   createdAt: string;
 };
+
+export type PostCategory =
+  | "general"
+  | "question"
+  | "event"
+  | "recommendation"
+  | "found"
+  | "warning"
+  | "party";
+
+export type PostStatus = "pending" | "visible" | "hidden" | "removed";
+
+export type ReportReason =
+  | "harassment"
+  | "hate"
+  | "sexual"
+  | "violence"
+  | "spam"
+  | "private_info"
+  | "wrong_location"
+  | "other";
 
 export type Comment = {
   id: string;
@@ -118,6 +144,8 @@ const SEED_POSTS: Post[] = [
     likesCount: 87,
     commentsCount: 12,
     liked: false,
+    category: "general",
+    status: "visible",
     createdAt: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
   },
   {
@@ -130,6 +158,8 @@ const SEED_POSTS: Post[] = [
     likesCount: 143,
     commentsCount: 28,
     liked: true,
+    category: "recommendation",
+    status: "visible",
     createdAt: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
   },
   {
@@ -143,6 +173,8 @@ const SEED_POSTS: Post[] = [
     likesCount: 56,
     commentsCount: 7,
     liked: false,
+    category: "general",
+    status: "visible",
     createdAt: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
   },
   {
@@ -156,6 +188,8 @@ const SEED_POSTS: Post[] = [
     likesCount: 201,
     commentsCount: 19,
     liked: false,
+    category: "general",
+    status: "visible",
     createdAt: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
   },
 ];
@@ -236,8 +270,16 @@ type AppContextType = {
   posts: Post[];
   comments: Comment[];
   parties: Party[];
-  addPost: (content: string, location: string, imageUrl?: string) => void;
-  toggleLike: (postId: string) => void;
+  refreshPosts: () => Promise<void>;
+  addPost: (
+    content: string,
+    location: string,
+    imageUrl?: string,
+    category?: PostCategory,
+  ) => Promise<void>;
+  deletePost: (postId: string) => Promise<void>;
+  reportPost: (postId: string, reason?: ReportReason) => Promise<void>;
+  toggleLike: (postId: string) => Promise<void>;
   addComment: (postId: string, content: string) => void;
   getCommentsForPost: (postId: string) => Comment[];
   getPostById: (postId: string) => Post | undefined;
@@ -248,15 +290,228 @@ const AppContext = createContext<AppContextType | null>(null);
 
 const STORAGE_KEY = "localsocial_data";
 
+type ProfileRow = {
+  id: string;
+  username: string | null;
+  display_name: string;
+  avatar_url: string | null;
+  bio: string | null;
+  home_location_name: string | null;
+};
+
+type PostRow = {
+  id: string;
+  author_id: string;
+  content: string;
+  image_url: string | null;
+  location_name: string;
+  likes_count: number;
+  comments_count: number;
+  category: PostCategory | null;
+  status: PostStatus | null;
+  created_at: string;
+};
+
+type SupabaseErrorLike = {
+  code?: string;
+  message?: string;
+};
+
+function isMissingModerationColumns(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as SupabaseErrorLike).code;
+  const message = (error as SupabaseErrorLike).message;
+  return (
+    code === "42703" &&
+    typeof message === "string" &&
+    (message.includes("posts.category") || message.includes("posts.status"))
+  );
+}
+
+function makeAvatarUrl(seed: string): string {
+  return `https://api.dicebear.com/9.x/thumbs/png?seed=${encodeURIComponent(seed)}`;
+}
+
+function mapProfileToUser(profile: ProfileRow): User {
+  return {
+    id: profile.id,
+    name: profile.display_name,
+    username: profile.username ?? profile.id.slice(0, 8),
+    avatar: profile.avatar_url ?? makeAvatarUrl(profile.id),
+    bio: profile.bio ?? "",
+    location: profile.home_location_name ?? "",
+    followersCount: 0,
+    followingCount: 0,
+    postsCount: 0,
+  };
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [posts, setPosts] = useState<Post[]>(SEED_POSTS);
   const [comments, setComments] = useState<Comment[]>(SEED_COMMENTS);
   const [parties, setParties] = useState<Party[]>([]);
-  const currentUser = ME;
+  const [currentUser, setCurrentUser] = useState<User>(ME);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  const refreshPosts = useCallback(async () => {
+    if (!user) {
+      await loadData();
+      return;
+    }
+
+    let postRows: PostRow[] | null = null;
+
+    const { data, error } = await supabase
+      .from("posts")
+      .select(
+        "id, author_id, content, image_url, location_name, likes_count, comments_count, category, status, created_at",
+      )
+      .eq("status", "visible")
+      .order("created_at", { ascending: false })
+      .returns<PostRow[]>();
+
+    if (error) {
+      if (!isMissingModerationColumns(error)) throw error;
+
+      const { data: legacyData, error: legacyError } = await supabase
+        .from("posts")
+        .select(
+          "id, author_id, content, image_url, location_name, likes_count, comments_count, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .returns<PostRow[]>();
+
+      if (legacyError) throw legacyError;
+      postRows = legacyData;
+    } else {
+      postRows = data;
+    }
+
+    const authorIds = Array.from(new Set((postRows ?? []).map((post) => post.author_id)));
+    const postIds = (postRows ?? []).map((post) => post.id);
+
+    const { data: profileRows } = authorIds.length
+      ? await supabase
+          .from("profiles")
+          .select("id, username, display_name, avatar_url, bio, home_location_name")
+          .in("id", authorIds)
+          .returns<ProfileRow[]>()
+      : { data: [] as ProfileRow[] };
+
+    const { data: likedRows } = postIds.length
+      ? await supabase
+          .from("post_likes")
+          .select("post_id")
+          .eq("profile_id", user.id)
+          .in("post_id", postIds)
+          .returns<{ post_id: string }[]>()
+      : { data: [] as { post_id: string }[] };
+
+    const profilesById = new Map(
+      (profileRows ?? []).map((profile) => [profile.id, mapProfileToUser(profile)]),
+    );
+    const likedPostIds = new Set((likedRows ?? []).map((like) => like.post_id));
+
+    setPosts(
+      (postRows ?? []).map((post) => {
+        const author =
+          profilesById.get(post.author_id) ??
+          ({
+            ...ME,
+            id: post.author_id,
+            name: "Local",
+            username: post.author_id.slice(0, 8),
+            avatar: makeAvatarUrl(post.author_id),
+          } satisfies User);
+
+        return {
+          id: post.id,
+          userId: post.author_id,
+          user: author,
+          content: post.content,
+          imageUrl: post.image_url ?? undefined,
+          location: post.location_name,
+          likesCount: post.likes_count,
+          commentsCount: post.comments_count,
+          liked: likedPostIds.has(post.id),
+          category: post.category ?? "general",
+          status: post.status ?? "visible",
+          createdAt: post.created_at,
+        };
+      }),
+    );
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    void refreshPosts();
+  }, [refreshPosts, user]);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) {
+        setCurrentUser(ME);
+        return;
+      }
+
+      const emailName = user.email?.split("@")[0] ?? user.id.slice(0, 8);
+      const metadata = user.user_metadata;
+      const displayName =
+        typeof metadata["display_name"] === "string" && metadata["display_name"].trim()
+          ? metadata["display_name"].trim()
+          : emailName;
+      const username =
+        typeof metadata["username"] === "string" && metadata["username"].trim()
+          ? metadata["username"].trim().toLowerCase()
+          : emailName.toLowerCase().replace(/[^a-z0-9_]/g, "");
+      const avatarUrl =
+        typeof metadata["avatar_url"] === "string" && metadata["avatar_url"].trim()
+          ? metadata["avatar_url"].trim()
+          : null;
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, username, display_name, avatar_url, bio, home_location_name")
+        .eq("id", user.id)
+        .maybeSingle<ProfileRow>();
+
+      if (data && !error) {
+        setCurrentUser(mapProfileToUser(data));
+        return;
+      }
+
+      const fallbackProfile = {
+        id: user.id,
+        username,
+        display_name: displayName,
+        avatar_url: avatarUrl,
+      };
+
+      const { data: upserted } = await supabase
+        .from("profiles")
+        .upsert(fallbackProfile, { onConflict: "id" })
+        .select("id, username, display_name, avatar_url, bio, home_location_name")
+        .single<ProfileRow>();
+
+      setCurrentUser(
+        upserted
+          ? mapProfileToUser(upserted)
+          : {
+              ...ME,
+              id: user.id,
+              name: displayName,
+              username,
+              avatar: avatarUrl ?? makeAvatarUrl(user.id),
+            },
+      );
+    };
+
+    void loadProfile();
+  }, [user]);
 
   const loadData = async () => {
     try {
@@ -282,9 +537,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addPost = useCallback(
-    (content: string, location: string, imageUrl?: string) => {
+    async (
+      content: string,
+      location: string,
+      imageUrl?: string,
+      category: PostCategory = "general",
+    ) => {
+      let postId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      let createdAt = new Date().toISOString();
+
+      if (user) {
+        const insertPayload = {
+          author_id: currentUser.id,
+          content,
+          image_url: imageUrl ?? null,
+          location_name: location,
+          category,
+          status: "visible",
+        };
+        const { data, error } = await supabase
+          .from("posts")
+          .insert(insertPayload)
+          .select("id, created_at")
+          .single<{ id: string; created_at: string }>();
+
+        if (error) {
+          if (!isMissingModerationColumns(error)) throw error;
+
+          const { data: legacyData, error: legacyError } = await supabase
+            .from("posts")
+            .insert({
+              author_id: currentUser.id,
+              content,
+              image_url: imageUrl ?? null,
+              location_name: location,
+            })
+            .select("id, created_at")
+            .single<{ id: string; created_at: string }>();
+
+          if (legacyError) throw legacyError;
+          postId = legacyData.id;
+          createdAt = legacyData.created_at;
+        } else {
+          postId = data.id;
+          createdAt = data.created_at;
+        }
+      }
+
       const newPost: Post = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        id: postId,
         userId: currentUser.id,
         user: currentUser,
         content,
@@ -293,17 +594,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         likesCount: 0,
         commentsCount: 0,
         liked: false,
-        createdAt: new Date().toISOString(),
+        category,
+        status: "visible",
+        createdAt,
       };
       const updated = [newPost, ...posts];
       setPosts(updated);
-      saveData(updated, comments);
+      if (!user) saveData(updated, comments);
     },
-    [posts, comments, currentUser, saveData]
+    [posts, comments, currentUser, saveData, user]
   );
 
   const toggleLike = useCallback(
-    (postId: string) => {
+    async (postId: string) => {
+      const post = posts.find((p) => p.id === postId);
+      if (!post) return;
+
       const updated = posts.map((p) => {
         if (p.id !== postId) return p;
         return {
@@ -313,9 +619,76 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
       });
       setPosts(updated);
-      saveData(updated, comments);
+
+      try {
+        if (user) {
+          if (post.liked) {
+            const { error } = await supabase
+              .from("post_likes")
+              .delete()
+              .eq("post_id", postId)
+              .eq("profile_id", user.id);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase
+              .from("post_likes")
+              .insert({ post_id: postId, profile_id: user.id });
+            if (error) throw error;
+          }
+          await refreshPosts();
+          return;
+        }
+
+        saveData(updated, comments);
+      } catch (error) {
+        setPosts(posts);
+        throw error;
+      }
     },
-    [posts, comments, saveData]
+    [posts, comments, refreshPosts, saveData, user]
+  );
+
+  const deletePost = useCallback(
+    async (postId: string) => {
+      const previousPosts = posts;
+      setPosts((prev) => prev.filter((post) => post.id !== postId));
+
+      try {
+        if (user) {
+          const { error } = await supabase
+            .from("posts")
+            .delete()
+            .eq("id", postId)
+            .eq("author_id", user.id);
+          if (error) throw error;
+          return;
+        }
+
+        const updatedPosts = previousPosts.filter((post) => post.id !== postId);
+        const updatedComments = comments.filter((comment) => comment.postId !== postId);
+        setComments(updatedComments);
+        await saveData(updatedPosts, updatedComments);
+      } catch (error) {
+        setPosts(previousPosts);
+        throw error;
+      }
+    },
+    [comments, posts, saveData, user],
+  );
+
+  const reportPost = useCallback(
+    async (postId: string, reason: ReportReason = "other") => {
+      if (!user) return;
+
+      const { error } = await supabase.from("post_reports").insert({
+        post_id: postId,
+        reporter_id: user.id,
+        reason,
+      });
+
+      if (error && error.code !== "23505") throw error;
+    },
+    [user],
   );
 
   const addComment = useCallback(
@@ -373,7 +746,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         posts,
         comments,
         parties,
+        refreshPosts,
         addPost,
+        deletePost,
+        reportPost,
         toggleLike,
         addComment,
         getCommentsForPost,

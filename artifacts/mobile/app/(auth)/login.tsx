@@ -15,21 +15,37 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
+import { useAuth } from "@/context/AuthContext";
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
+  const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleLogin = async () => {
+    if (!email.trim() || !password) {
+      setErrorMessage("Bitte Email und Passwort eingeben.");
+      return;
+    }
+
     setLoading(true);
-    await AsyncStorage.setItem("locals_onboarding_seen", "true");
-    setLoading(false);
-    router.replace("/");
+    setErrorMessage(null);
+
+    try {
+      await signIn(email, password);
+      await AsyncStorage.setItem("locals_onboarding_seen", "true");
+      router.replace("/");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Login fehlgeschlagen.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -115,6 +131,8 @@ export default function LoginScreen() {
               {loading ? "Signing in..." : "Sign In"}
             </Text>
           </Pressable>
+
+          {errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
         </View>
 
         <View style={styles.footer}>
@@ -197,6 +215,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.light.tint,
+    textAlign: "center",
+    lineHeight: 18,
   },
   footer: {
     flexDirection: "row",

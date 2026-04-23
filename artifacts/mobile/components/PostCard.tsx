@@ -3,6 +3,8 @@ import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useRef } from "react";
 import {
+  ActionSheetIOS,
+  Alert,
   Animated,
   Image,
   Platform,
@@ -15,17 +17,28 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { TimeAgo } from "@/components/TimeAgo";
 import Colors from "@/constants/colors";
-import { Post, useApp } from "@/context/AppContext";
+import { Post, ReportReason, useApp } from "@/context/AppContext";
+import { useLocation } from "@/context/LocationContext";
 
 type Props = {
   post: Post;
 };
 
 export function PostCard({ post }: Props) {
-  const { toggleLike } = useApp();
+  const { currentUser, deletePost, reportPost, toggleLike } = useApp();
+  const { effectivePresenceMode } = useLocation();
   const heartScale = useRef(new Animated.Value(1)).current;
+  const isOwnPost = post.userId === currentUser.id;
 
   const handleLike = () => {
+    if (effectivePresenceMode === "home") {
+      Alert.alert(
+        "Daheim-Modus",
+        "Du bist gerade passiv unterwegs. Wechsle zu Online, um zu liken.",
+      );
+      return;
+    }
+
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -38,6 +51,101 @@ export function PostCard({ post }: Props) {
 
   const handlePostPress = () => {
     router.push({ pathname: "/post/[id]", params: { id: post.id } });
+  };
+
+  const confirmDelete = () => {
+    Alert.alert("Post löschen?", "Dieser Post wird dauerhaft entfernt.", [
+      { text: "Abbrechen", style: "cancel" },
+      {
+        text: "Löschen",
+        style: "destructive",
+        onPress: () => {
+          void deletePost(post.id).catch(() => {
+            Alert.alert("Fehler", "Der Post konnte nicht gelöscht werden.");
+          });
+        },
+      },
+    ]);
+  };
+
+  const submitReport = (reason: ReportReason = "other") => {
+    void reportPost(post.id, reason)
+      .then(() => {
+        Alert.alert("Danke", "Wir haben deine Meldung gespeichert.");
+      })
+      .catch(() => {
+        Alert.alert("Fehler", "Die Meldung konnte nicht gespeichert werden.");
+      });
+  };
+
+  const openReportMenu = () => {
+    const labels = [
+      "Belästigung",
+      "Hass oder Beleidigung",
+      "Sexuelle Inhalte",
+      "Gewalt oder Gefahr",
+      "Spam oder Betrug",
+      "Private Daten",
+      "Falscher Ort",
+      "Sonstiges",
+      "Abbrechen",
+    ];
+    const reasons: ReportReason[] = [
+      "harassment",
+      "hate",
+      "sexual",
+      "violence",
+      "spam",
+      "private_info",
+      "wrong_location",
+      "other",
+    ];
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: labels,
+          cancelButtonIndex: labels.length - 1,
+          title: "Post melden",
+        },
+        (buttonIndex) => {
+          const reason = reasons[buttonIndex];
+          if (reason) submitReport(reason);
+        },
+      );
+      return;
+    }
+
+    Alert.alert("Post melden", "Warum möchtest du diesen Post melden?", [
+      ...labels.slice(0, -1).map((label, index) => ({
+        text: label,
+        onPress: () => submitReport(reasons[index]),
+      })),
+      { text: "Abbrechen", style: "cancel" },
+    ]);
+  };
+
+  const openPostMenu = () => {
+    if (isOwnPost) {
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: ["Post löschen", "Abbrechen"],
+            destructiveButtonIndex: 0,
+            cancelButtonIndex: 1,
+          },
+          (buttonIndex) => {
+            if (buttonIndex === 0) confirmDelete();
+          },
+        );
+        return;
+      }
+
+      confirmDelete();
+      return;
+    }
+
+    openReportMenu();
   };
 
   return (
@@ -60,7 +168,7 @@ export function PostCard({ post }: Props) {
             </View>
           </View>
         </Pressable>
-        <Pressable style={styles.moreBtn}>
+        <Pressable style={styles.moreBtn} onPress={openPostMenu}>
           <Feather name="more-horizontal" size={18} color={Colors.light.textSecondary} />
         </Pressable>
       </View>

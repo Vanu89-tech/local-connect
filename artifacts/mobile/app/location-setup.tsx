@@ -26,16 +26,21 @@ export default function LocationSetupScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const geocodeHome = async (name: string) => {
-    const results = await Location.geocodeAsync(name);
+  const geocodeHome = async (address: string) => {
+    const results = await Location.geocodeAsync(address);
     if (!results.length) throw new Error("not_found");
-    return { name, lat: results[0].latitude, lng: results[0].longitude };
+    return {
+      name: "Daheim",
+      address,
+      lat: results[0].latitude,
+      lng: results[0].longitude,
+    };
   };
 
   const finishSetup = async (withGps: boolean) => {
     const trimmed = homeInput.trim();
     if (!trimmed) {
-      setError("Bitte gib dein Heimviertel oder deine Stadt ein.");
+      setError("Bitte gib deine Adresse ein.");
       return;
     }
     setLoading(true);
@@ -50,7 +55,7 @@ export default function LocationSetupScreen() {
       router.replace("/");
     } catch (e: any) {
       if (e.message === "not_found") {
-        setError("Ort nicht gefunden. Versuche es mit Viertel, Stadt oder PLZ.");
+        setError("Adresse nicht gefunden. Versuche es mit Straße, Hausnummer und Stadt.");
       } else {
         setError("Fehler beim Einrichten. Bitte versuche es erneut.");
       }
@@ -75,19 +80,19 @@ export default function LocationSetupScreen() {
           <Feather name="map-pin" size={36} color={Colors.light.primary} />
         </View>
 
-        <Text style={styles.title}>Dein Heimbereich</Text>
+        <Text style={styles.title}>Deine Heimadresse</Text>
         <Text style={styles.subtitle}>
-          Locals zeigt dir, was in deiner Nähe passiert. Damit du{" "}
-          <Text style={styles.bold}>zuhause anonym bleibst</Text>, legst du jetzt
-          dein Heimviertel fest — deine genaue Adresse bleibt privat.
+          Locals nutzt deine Adresse nur für den 500-Meter-Heimbereich. Wenn du
+          dich deinem Zuhause näherst, gehst du automatisch in den passiven
+          Daheim-Modus.
         </Text>
 
         {/* Home input */}
         <View style={styles.inputSection}>
-          <Text style={styles.label}>Dein Heimviertel oder Stadt</Text>
+          <Text style={styles.label}>Deine Adresse</Text>
           <TextInput
             style={[styles.input, error ? styles.inputError : null]}
-            placeholder="z.B. Schwabing, München"
+            placeholder="Straße, Hausnummer, Stadt"
             placeholderTextColor={Colors.light.textTertiary}
             value={homeInput}
             onChangeText={(t) => {
@@ -105,8 +110,8 @@ export default function LocationSetupScreen() {
             </View>
           )}
           <Text style={styles.hint}>
-            Wenn du in diesem Bereich bist, wird nur der Name dieses Viertels
-            geteilt — nicht dein genauer Standort.
+            Deine genaue Adresse wird nicht anderen Nutzern angezeigt. Im
+            Heimbereich erscheinst du automatisch offline.
           </Text>
         </View>
 
@@ -114,8 +119,8 @@ export default function LocationSetupScreen() {
         <View style={styles.privacyBox}>
           <Feather name="shield" size={16} color={Colors.light.tintBlue} />
           <Text style={styles.privacyText}>
-            Unterwegs siehst du echte lokale Posts. Zuhause bleibst du anonym.
-            Dein Live-Standort wird niemals an andere weitergegeben.
+            Der Heimbereich ist aktuell ein 500-Meter-Perimeter. Im Daheim-Modus
+            kannst du Posts und Karte sehen, aber nicht aktiv posten.
           </Text>
         </View>
 
