@@ -344,13 +344,17 @@ function buildMapHtml(
   parties: { id: string; name: string; lat: number; lng: number; hostName: string; members: { id: string; name: string; lat: number; lng: number }[] }[],
   locationName: string,
   filterMode: MapFilterMode,
-  presenceMode: MapPresenceMode
+  presenceMode: MapPresenceMode,
+  showDevMapTools: boolean
 ) {
   const usersJson = JSON.stringify(activeUsers);
   const livePoisJson = JSON.stringify(livePois);
   const partiesJson = JSON.stringify(parties);
   const filterModeJson = JSON.stringify(filterMode);
   const presenceModeJson = JSON.stringify(presenceMode);
+  const dev3dButtonHtml = showDevMapTools
+    ? '<button id="dev-3d" aria-label="3D Ansicht" type="button">3D</button>'
+    : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -390,7 +394,7 @@ function buildMapHtml(
       z-index: 360;
       box-shadow: inset 0 0 80px rgba(21, 34, 56, 0.32);
     }
-    #compass {
+    #recenter {
       position: fixed;
       right: 16px;
       bottom: 116px;
@@ -402,16 +406,22 @@ function buildMapHtml(
         radial-gradient(circle at 30% 28%, #fff8cc 0%, #fff8cc 24%, var(--comic-yellow) 100%);
       box-shadow: 0 3px 0 rgba(21, 34, 56, 0.35);
       z-index: 500;
-      pointer-events: none;
+      pointer-events: auto;
       display: flex;
       align-items: center;
       justify-content: center;
       color: #1d2b45;
-      font-size: 12px;
+      font-size: 25px;
       font-weight: 900;
       letter-spacing: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
-    #compass::before {
+    #recenter:active {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 rgba(21, 34, 56, 0.35);
+    }
+    #recenter::before {
       content: "✦";
       position: absolute;
       top: 6px;
@@ -423,23 +433,27 @@ function buildMapHtml(
     .maplibregl-canvas {
       filter: saturate(1.3) contrast(1.06) hue-rotate(-4deg) brightness(1.03);
     }
-    .maplibregl-ctrl-group {
-      border: none !important;
-      background: transparent !important;
-      box-shadow: none !important;
+    #dev-3d {
+      position: fixed;
+      right: 16px;
+      bottom: 190px;
+      min-width: 54px;
+      height: 42px;
+      border-radius: 8px;
+      border: 2px solid var(--outline);
+      background: linear-gradient(180deg, #ffffff 0%, #d9efff 100%);
+      box-shadow: 0 3px 0 rgba(21, 34, 56, 0.32);
+      z-index: 500;
+      color: #152238;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
-    .maplibregl-ctrl button {
-      border: 2px solid var(--outline) !important;
-      background: linear-gradient(180deg, #ffffff 0%, #d9efff 100%) !important;
-      color: #1d2b45 !important;
-      box-shadow: 0 2px 0 rgba(21, 34, 56, 0.3) !important;
-      border-radius: 8px !important;
-      margin-bottom: 4px !important;
-      width: 34px !important;
-      height: 34px !important;
-    }
-    .maplibregl-ctrl button:hover {
-      background: linear-gradient(180deg, #fff6ff 0%, #d9efff 100%) !important;
+    #dev-3d:active {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 rgba(21, 34, 56, 0.32);
     }
     .pulse { animation: pulse 2s infinite; }
     @keyframes pulse {
@@ -539,7 +553,8 @@ function buildMapHtml(
   <div id="map"></div>
   <div id="parchment-overlay"></div>
   <div id="vignette"></div>
-  <div id="compass">N</div>
+  <button id="recenter" aria-label="Auf mich zentrieren" type="button">⌖</button>
+  ${dev3dButtonHtml}
   <script>
     function postNativeMessage(payload) {
       try {
@@ -602,7 +617,41 @@ function buildMapHtml(
     map.touchPitch.enable();
     map.doubleClickZoom.disable();
 
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+    var recenterButton = document.getElementById('recenter');
+    if (recenterButton) {
+      recenterButton.addEventListener('click', function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        map.easeTo({
+          center: [${lng}, ${lat}],
+          zoom: Math.max(map.getZoom(), initialZoom),
+          duration: 420
+        });
+      });
+    }
+
+    var dev3dButton = document.getElementById('dev-3d');
+    if (dev3dButton) {
+      dev3dButton.addEventListener('click', function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        var isIn3D = map.getPitch() > 10;
+        dev3dButton.textContent = isIn3D ? '3D' : '2D';
+        dev3dButton.setAttribute('aria-label', isIn3D ? '3D Ansicht' : '2D Ansicht');
+        map.easeTo({
+          center: map.getCenter(),
+          zoom: isIn3D ? map.getZoom() : Math.max(map.getZoom(), 16),
+          pitch: isIn3D ? 0 : 54,
+          bearing: 0,
+          duration: 480
+        });
+      });
+      map.on('pitchend', function() {
+        var isIn3D = map.getPitch() > 10;
+        dev3dButton.textContent = isIn3D ? '2D' : '3D';
+        dev3dButton.setAttribute('aria-label', isIn3D ? '2D Ansicht' : '3D Ansicht');
+      });
+    }
 
     function clearMarkers() {
       markerRefs.forEach(function(marker) {
@@ -790,6 +839,91 @@ function buildMapHtml(
       );
     }
 
+    function addComicBuildings() {
+      var style = map.getStyle();
+      if (!style || !style.layers) return;
+      var sourceName = resolveVectorSourceName();
+      if (!sourceName) return;
+
+      var labelLayerId = null;
+      for (var i = 0; i < style.layers.length; i += 1) {
+        var layer = style.layers[i];
+        if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+          labelLayerId = layer.id;
+          break;
+        }
+      }
+
+      try {
+        if (!map.getLayer('locals-comic-building-shadow')) {
+          map.addLayer(
+            {
+              id: 'locals-comic-building-shadow',
+              type: 'fill',
+              source: sourceName,
+              'source-layer': 'building',
+              minzoom: 13,
+              paint: {
+                'fill-color': '#152238',
+                'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.08, 16, 0.16],
+                'fill-translate': [2, 3],
+                'fill-translate-anchor': 'viewport'
+              }
+            },
+            labelLayerId
+          );
+        }
+
+        if (!map.getLayer('locals-comic-building-fill')) {
+          map.addLayer(
+            {
+              id: 'locals-comic-building-fill',
+              type: 'fill',
+              source: sourceName,
+              'source-layer': 'building',
+              minzoom: 13,
+              paint: {
+                'fill-color': [
+                  'interpolate',
+                  ['linear'],
+                  ['coalesce', ['get', 'render_height'], 0],
+                  0, '#e0fbff',
+                  40, '#c7f3ff',
+                  120, '#ffe0f0',
+                  220, '#fff0b3'
+                ],
+                'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.38, 16, 0.62]
+              }
+            },
+            labelLayerId
+          );
+        }
+
+        if (!map.getLayer('locals-comic-building-outline')) {
+          map.addLayer(
+            {
+              id: 'locals-comic-building-outline',
+              type: 'line',
+              source: sourceName,
+              'source-layer': 'building',
+              minzoom: 13,
+              paint: {
+                'line-color': '#152238',
+                'line-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.36, 16, 0.78],
+                'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 16, 1.8, 18, 2.4]
+              }
+            },
+            labelLayerId
+          );
+        }
+      } catch (err) {
+        postNativeMessage({
+          type: 'map_error',
+          message: err && err.message ? err.message : String(err || 'Comic-Gebäude konnten nicht geladen werden')
+        });
+      }
+    }
+
     function add3DBuildings() {
       var style = map.getStyle();
       if (!style || !style.layers) return;
@@ -809,10 +943,10 @@ function buildMapHtml(
         'interpolate',
         ['linear'],
         ['coalesce', ['get', 'render_height'], 0],
-        0, '#a5f3fc',
-        40, '#7dd3fc',
-        120, '#f9a8d4',
-        220, '#fcd34d'
+        0, '#bdf7ff',
+        40, '#8fe7ff',
+        120, '#ffb7d8',
+        220, '#ffe17a'
       ];
       var extrusionHeight = [
         'interpolate',
@@ -1300,6 +1434,7 @@ function buildMapHtml(
       var currentFilter = ${filterModeJson};
       var peopleOnly = currentFilter === 'people';
 
+      addComicBuildings();
       add3DBuildings();
       if (!peopleOnly) addLivePoiMarkers();
       addPartyAndMemberMarkers();
@@ -1676,7 +1811,8 @@ out center tags ${LIVE_POI_LIMIT};`;
       visibleParties,
       currentLocationName ?? homeLocation.name,
       filterMode,
-      presenceMode
+      presenceMode,
+      __DEV__
     );
   }, [homeLocation, visibleUsers, livePois, visibleParties, currentLocationName, filterMode, presenceMode]);
 
