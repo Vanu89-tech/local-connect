@@ -610,7 +610,7 @@ const styles = StyleSheet.create({
   passiveButtonText: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+    color: Colors.light.onPrimary,
   },
   topBar: {
     flexDirection: "row",
@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
   postBtnText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+    color: Colors.light.onPrimary,
   },
   postBtnTextDisabled: {
     color: Colors.light.placeholder,
@@ -843,7 +843,7 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
   },
   categoryChipTextSelected: {
-    color: "#FFFFFF",
+    color: Colors.light.onPrimary,
   },
 
   // Location
@@ -931,7 +931,7 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
   },
   chipTextSelected: {
-    color: "#FFFFFF",
+    color: Colors.light.onPrimary,
     fontFamily: "Inter_500Medium",
   },
 

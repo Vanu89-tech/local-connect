@@ -1,14 +1,16 @@
 import { Stack } from "expo-router";
 import React from "react";
 
+import Colors from "@/constants/colors";
+
 export default function AuthLayout() {
   return (
     <Stack
       screenOptions={{
         headerBackButtonDisplayMode: "minimal",
-        headerTintColor: "#1A1A2E",
+        headerTintColor: Colors.light.text,
         headerTitleStyle: { fontFamily: "Inter_600SemiBold", fontSize: 16 },
-        headerStyle: { backgroundColor: "#FFFFFF" },
+        headerStyle: { backgroundColor: Colors.light.backgroundSecondary },
         headerShadowVisible: false,
       }}
     >

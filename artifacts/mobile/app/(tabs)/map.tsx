@@ -67,9 +67,9 @@ const MOCK_PARTY_SEEDS = [
 ];
 
 const PARTY_COLORS = {
-  fill: "#8B5CF6",
-  shadow: "rgba(139,92,246,0.55)",
-  circle: "#8B5CF6",
+  fill: Colors.map.partyFill,
+  shadow: Colors.map.partyShadow,
+  circle: Colors.map.partyFill,
 };
 
 type MapFilterMode = "all" | "people" | "friends" | "dating";
@@ -195,9 +195,9 @@ const PRESENCE_OPTIONS: {
   color: string;
   background: string;
 }[] = [
-  { mode: "online", label: "Online", icon: "●", color: "#FF6B6B", background: "#fff1f2" },
-  { mode: "friend", label: "Freunde", icon: "♥", color: "#16a34a", background: "#dcfce7" },
-  { mode: "relationship", label: "Beziehung", icon: "♥", color: "#ef4444", background: "#fee2e2" },
+  { mode: "online", label: "Online", icon: "●", color: Colors.light.tint, background: Colors.light.backgroundTertiary },
+  { mode: "friend", label: "Freunde", icon: "♥", color: Colors.light.mint, background: Colors.light.backgroundTertiary },
+  { mode: "relationship", label: "Beziehung", icon: "♥", color: Colors.light.danger, background: Colors.light.backgroundTertiary },
 ];
 
 type PresenceRow = {
@@ -232,48 +232,48 @@ function PartyPopperIcon({ size = 20 }: { size?: number }) {
     <Svg width={size} height={size} viewBox="0 0 24 24">
       <Path
         d="M5.1 5.2h6.7c-.2 2.6-1.6 4.8-3.4 5.6C6.7 10 5.3 7.8 5.1 5.2Z"
-        fill="#FDE68A"
-        stroke="#FFFFFF"
+        fill={Colors.light.yellow}
+        stroke={Colors.light.onBright}
         strokeLinejoin="round"
         strokeWidth="1.3"
         transform="rotate(-22 8.45 8)"
       />
       <Path
         d="M12.2 5.2h6.7c-.2 2.6-1.6 4.8-3.4 5.6-1.7-.8-3.1-3-3.3-5.6Z"
-        fill="#FDE68A"
-        stroke="#FFFFFF"
+        fill={Colors.light.yellow}
+        stroke={Colors.light.onBright}
         strokeLinejoin="round"
         strokeWidth="1.3"
         transform="rotate(22 15.55 8)"
       />
       <Path
         d="M8.4 10.7v6.4M15.6 10.7v6.4M5.9 18.6h5M13.1 18.6h5"
-        stroke="#FFFFFF"
+        stroke={Colors.light.onBright}
         strokeLinecap="round"
         strokeWidth="1.6"
       />
       <Path
         d="M6.2 7.2h4.1M13.7 7.2h4.1"
-        stroke="#FFF7ED"
+        stroke={Colors.light.backgroundSecondary}
         strokeLinecap="round"
         strokeWidth="1.2"
       />
       <Path
         d="M7.2 3.9 8.5 7.2M16.8 3.9l-1.3 3.3"
-        stroke="#FFFFFF"
+        stroke={Colors.light.onBright}
         strokeLinecap="round"
         strokeWidth="1.2"
       />
       <Path
         d="M11.2 3.8h1.6M12 3v1.6M4.2 4.1l1 .8M19.8 4.1l-1 .8"
-        stroke="#4ECDC4"
+        stroke={Colors.light.tintBlue}
         strokeLinecap="round"
         strokeWidth="1.5"
       />
-      <Circle cx="3.8" cy="10.3" fill="#22C55E" r="0.9" />
-      <Circle cx="20.2" cy="10.3" fill="#EF4444" r="0.9" />
-      <Circle cx="5.1" cy="15.3" fill="#4ECDC4" r="0.8" />
-      <Circle cx="18.9" cy="15.3" fill="#FDE047" r="0.8" />
+      <Circle cx="3.8" cy="10.3" fill={Colors.light.mint} r="0.9" />
+      <Circle cx="20.2" cy="10.3" fill={Colors.light.danger} r="0.9" />
+      <Circle cx="5.1" cy="15.3" fill={Colors.light.tintBlue} r="0.8" />
+      <Circle cx="18.9" cy="15.3" fill={Colors.light.yellow} r="0.8" />
     </Svg>
   );
 }
@@ -392,6 +392,11 @@ function buildMapHtml(
   const partiesJson = JSON.stringify(parties);
   const filterModeJson = JSON.stringify(filterMode);
   const presenceModeJson = JSON.stringify(presenceMode);
+  const mapStyle = Colors.map;
+  const appColors = Colors.light;
+  const isNeonStyle = Colors.activeStyle.id === "neon";
+  const markerRadius = isNeonStyle ? "8px" : "50%";
+  const smallMarkerRadius = isNeonStyle ? "5px" : "50%";
   const dev3dButtonHtml = showDevMapTools
     ? '<button id="dev-3d" aria-label="3D Ansicht" type="button">3D</button>'
     : '';
@@ -404,14 +409,20 @@ function buildMapHtml(
   <script src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
   <style>
     :root {
-      --ink: #152238;
-      --paper: #eaf4ff;
-      --accent: #ff4d8f;
-      --mint: #22c55e;
-      --outline: #152238;
-      --comic-blue: #5dd6ff;
-      --comic-pink: #ff7ab6;
-      --comic-yellow: #ffd84d;
+      --ink: ${appColors.text};
+      --paper: ${mapStyle.paper};
+      --accent: ${appColors.tint};
+      --mint: ${appColors.mint};
+      --outline: ${appColors.text};
+      --accent-blue: ${mapStyle.accentBlue};
+      --accent-pink: ${mapStyle.accentPink};
+      --accent-yellow: ${mapStyle.accentYellow};
+      --building-low: ${mapStyle.buildingLow};
+      --building-mid: ${mapStyle.buildingMid};
+      --building-high: ${mapStyle.buildingHigh};
+      --building-tall: ${mapStyle.buildingTall};
+      --marker-radius: ${markerRadius};
+      --small-marker-radius: ${smallMarkerRadius};
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: var(--paper); font-family: "Avenir Next", "Trebuchet MS", "Arial Rounded MT Bold", sans-serif; overflow: hidden; }
@@ -422,9 +433,12 @@ function buildMapHtml(
       pointer-events: none;
       z-index: 330;
       background:
-        radial-gradient(circle at 15% 14%, rgba(93, 214, 255, 0.22) 0%, rgba(93, 214, 255, 0) 34%),
-        radial-gradient(circle at 82% 86%, rgba(255, 122, 182, 0.2) 0%, rgba(255, 122, 182, 0) 36%),
-        radial-gradient(circle at 50% 40%, rgba(255, 216, 77, 0.16) 0%, rgba(255, 216, 77, 0) 40%);
+        linear-gradient(rgba(0, 240, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.07) 1px, transparent 1px),
+        radial-gradient(circle at 12% 16%, ${mapStyle.overlayBlue} 0%, rgba(0, 240, 255, 0) 32%),
+        radial-gradient(circle at 84% 80%, ${mapStyle.overlayPink} 0%, rgba(255, 43, 214, 0) 36%),
+        radial-gradient(circle at 52% 42%, ${mapStyle.overlayYellow} 0%, rgba(239, 255, 58, 0) 38%);
+      background-size: 34px 34px, 34px 34px, auto, auto, auto;
       mix-blend-mode: screen;
     }
     #vignette {
@@ -432,7 +446,9 @@ function buildMapHtml(
       inset: 0;
       pointer-events: none;
       z-index: 360;
-      box-shadow: inset 0 0 80px rgba(21, 34, 56, 0.32);
+      box-shadow:
+        inset 0 0 90px rgba(0, 240, 255, 0.16),
+        inset 0 0 180px rgba(0, 0, 0, 0.62);
     }
     #recenter {
       position: fixed;
@@ -440,17 +456,18 @@ function buildMapHtml(
       bottom: 116px;
       width: 62px;
       height: 62px;
-      border-radius: 999px;
+      border-radius: var(--marker-radius);
       border: 2px solid var(--outline);
       background:
-        radial-gradient(circle at 30% 28%, #fff8cc 0%, #fff8cc 24%, var(--comic-yellow) 100%);
-      box-shadow: 0 3px 0 rgba(21, 34, 56, 0.35);
+        linear-gradient(135deg, rgba(0,240,255,0.24) 0%, rgba(255,43,214,0.22) 100%),
+        #07131f;
+      box-shadow: 0 0 0 1px rgba(0,240,255,0.45), 0 0 18px rgba(0,240,255,0.42);
       z-index: 500;
       pointer-events: auto;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #1d2b45;
+      color: var(--accent-blue);
       font-size: 25px;
       font-weight: 900;
       letter-spacing: 0;
@@ -459,7 +476,7 @@ function buildMapHtml(
     }
     #recenter:active {
       transform: translateY(2px);
-      box-shadow: 0 1px 0 rgba(21, 34, 56, 0.35);
+      box-shadow: 0 0 10px rgba(255,43,214,0.42);
     }
     #recenter::before {
       content: "✦";
@@ -467,11 +484,11 @@ function buildMapHtml(
       top: 6px;
       left: 50%;
       transform: translateX(-50%);
-      color: #ff4d8f;
+      color: var(--accent-pink);
       font-size: 13px;
     }
     .maplibregl-canvas {
-      filter: saturate(1.3) contrast(1.06) hue-rotate(-4deg) brightness(1.03);
+      filter: saturate(1.75) contrast(1.2) hue-rotate(-9deg) brightness(0.82);
     }
     #dev-3d {
       position: fixed;
@@ -479,12 +496,12 @@ function buildMapHtml(
       bottom: 190px;
       min-width: 54px;
       height: 42px;
-      border-radius: 8px;
+      border-radius: var(--marker-radius);
       border: 2px solid var(--outline);
-      background: linear-gradient(180deg, #ffffff 0%, #d9efff 100%);
-      box-shadow: 0 3px 0 rgba(21, 34, 56, 0.32);
+      background: linear-gradient(135deg, rgba(255,43,214,0.22) 0%, rgba(0,240,255,0.24) 100%), #07131f;
+      box-shadow: 0 0 16px rgba(255,43,214,0.4);
       z-index: 500;
-      color: #152238;
+      color: var(--accent-blue);
       font-size: 13px;
       font-weight: 900;
       letter-spacing: 0;
@@ -503,22 +520,22 @@ function buildMapHtml(
     }
     .party-pulse { animation: partyPulse 2.4s infinite; }
     @keyframes partyPulse {
-      0%   { box-shadow: 0 0 0 0 rgba(139,92,246,0.55); }
-      60%  { box-shadow: 0 0 0 10px rgba(139,92,246,0); }
-      100% { box-shadow: 0 0 0 0 rgba(139,92,246,0); }
+      0%   { box-shadow: 0 0 0 0 ${PARTY_COLORS.shadow}; }
+      60%  { box-shadow: 0 0 0 13px rgba(255,43,214,0); }
+      100% { box-shadow: 0 0 0 0 rgba(255,43,214,0); }
     }
     .popup { font-size: 13px; min-width: 130px; }
     .popup a  { display: block; color: var(--ink); font-weight: 800; cursor: pointer; text-decoration: none; }
     .popup a:active { color: var(--accent); }
     .popup strong { display: block; color: var(--ink); font-weight: 900; font-size: 14px; }
-    .popup span { color: #3d4f6d; font-size: 11px; margin-top: 2px; display: block; font-weight: 700; }
+    .popup span { color: var(--accent-blue); font-size: 11px; margin-top: 2px; display: block; font-weight: 700; }
     .friend-name-tag {
       padding: 2px 8px;
-      border-radius: 8px;
-      border: 2px solid #152238;
-      background: rgba(255, 251, 235, 0.96);
-      box-shadow: 0 2px 0 rgba(21,34,56,0.25);
-      color: #152238;
+      border-radius: var(--marker-radius);
+      border: 1px solid var(--accent-blue);
+      background: rgba(7, 19, 31, 0.92);
+      box-shadow: 0 0 12px rgba(0,240,255,0.32);
+      color: var(--ink);
       font-size: 11px;
       font-weight: 900;
       white-space: nowrap;
@@ -548,18 +565,18 @@ function buildMapHtml(
     .info-sheet-avatar {
       width: 42px;
       height: 42px;
-      border-radius: 999px;
-      border: 2px solid #152238;
-      background: #dbeafe;
+      border-radius: var(--marker-radius);
+      border: 1px solid var(--accent-blue);
+      background: #07131f;
       object-fit: cover;
       flex-shrink: 0;
     }
     .info-sheet-icon {
       width: 42px;
       height: 42px;
-      border-radius: 999px;
-      border: 2px solid #152238;
-      background: #f8fafc;
+      border-radius: var(--marker-radius);
+      border: 1px solid var(--accent-blue);
+      background: #07131f;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -569,21 +586,21 @@ function buildMapHtml(
     .info-sheet-title {
       font-size: 14px;
       font-weight: 900;
-      color: #152238;
+      color: var(--ink);
       line-height: 1.1;
     }
     .info-sheet-activity {
       margin-top: 4px;
       font-size: 11px;
       font-weight: 700;
-      color: #334155;
+      color: var(--accent-blue);
       line-height: 1.2;
     }
     .maplibregl-popup-content {
-      border-radius: 8px;
-      box-shadow: 0 6px 0 rgba(21, 34, 56, 0.26);
+      border-radius: var(--marker-radius);
+      box-shadow: 0 0 18px rgba(0, 240, 255, 0.32), 0 0 28px rgba(255, 43, 214, 0.18);
       border: 2px solid var(--outline);
-      background: linear-gradient(180deg, #fffbff 0%, #dff4ff 100%);
+      background: linear-gradient(180deg, rgba(7,19,31,0.98) 0%, rgba(8,28,43,0.98) 100%);
       padding: 10px 12px;
     }
     .maplibregl-popup-tip { border-top-color: var(--outline) !important; }
@@ -720,7 +737,7 @@ function buildMapHtml(
       return sourceName;
     }
 
-    function addComicPoiLayers() {
+    function addStyledPoiLayers() {
       var style = map.getStyle();
       if (!style || !style.layers) return;
       var sourceName = resolveVectorSourceName();
@@ -757,8 +774,8 @@ function buildMapHtml(
                   12, 8,
                   16, 12
                 ],
-                'circle-color': '#ffffff',
-                'circle-opacity': 0.38
+                'circle-color': badgeColor,
+                'circle-opacity': 0.18
               }
             },
             labelLayerId
@@ -783,8 +800,8 @@ function buildMapHtml(
                   16, 11
                 ],
                 'circle-color': badgeColor,
-                'circle-stroke-color': '#152238',
-                'circle-stroke-width': 2,
+                'circle-stroke-color': '${appColors.text}',
+                'circle-stroke-width': 1.2,
                 'circle-opacity': 0.95
               }
             },
@@ -820,7 +837,7 @@ function buildMapHtml(
       }
 
       addBadgeAndIcon(
-        'locals-comic-bus',
+        'locals-styled-bus',
         [
           'any',
           ['==', ['get', 'class'], 'bus'],
@@ -829,13 +846,13 @@ function buildMapHtml(
           ['==', ['get', 'subclass'], 'bus_station'],
           ['==', ['get', 'subclass'], 'public_transport']
         ],
-        '#fde68a',
+        '${mapStyle.accentYellow}',
         'bus',
         1.15
       );
 
       addBadgeAndIcon(
-        'locals-comic-school',
+        'locals-styled-school',
         [
           'any',
           ['==', ['get', 'class'], 'school'],
@@ -844,26 +861,26 @@ function buildMapHtml(
           ['==', ['get', 'subclass'], 'university'],
           ['==', ['get', 'subclass'], 'college']
         ],
-        '#bfdbfe',
+        '${mapStyle.accentBlue}',
         'college',
         1.12
       );
 
       addBadgeAndIcon(
-        'locals-comic-church',
+        'locals-styled-church',
         [
           'any',
           ['==', ['get', 'class'], 'place_of_worship'],
           ['==', ['get', 'subclass'], 'place_of_worship'],
           ['==', ['get', 'subclass'], 'church']
         ],
-        '#fecaca',
+        '${mapStyle.accentPink}',
         'religious-christian',
         1.08
       );
 
       addBadgeAndIcon(
-        'locals-comic-cafe',
+        'locals-styled-cafe',
         [
           'any',
           ['==', ['get', 'class'], 'cafe'],
@@ -873,13 +890,13 @@ function buildMapHtml(
           ['==', ['get', 'subclass'], 'restaurant'],
           ['==', ['get', 'subclass'], 'fast_food']
         ],
-        '#fed7aa',
+        '${mapStyle.buildingTall}',
         'cafe',
         1.05
       );
     }
 
-    function addComicBuildings() {
+    function addStyledBuildings() {
       var style = map.getStyle();
       if (!style || !style.layers) return;
       var sourceName = resolveVectorSourceName();
@@ -895,18 +912,18 @@ function buildMapHtml(
       }
 
       try {
-        if (!map.getLayer('locals-comic-building-shadow')) {
+        if (!map.getLayer('locals-styled-building-shadow')) {
           map.addLayer(
             {
-              id: 'locals-comic-building-shadow',
+              id: 'locals-styled-building-shadow',
               type: 'fill',
               source: sourceName,
               'source-layer': 'building',
               minzoom: 13,
               paint: {
-                'fill-color': '#152238',
-                'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.08, 16, 0.16],
-                'fill-translate': [2, 3],
+                'fill-color': '${appColors.text}',
+                'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.12, 16, 0.26],
+                'fill-translate': [3, 4],
                 'fill-translate-anchor': 'viewport'
               }
             },
@@ -914,10 +931,10 @@ function buildMapHtml(
           );
         }
 
-        if (!map.getLayer('locals-comic-building-fill')) {
+        if (!map.getLayer('locals-styled-building-fill')) {
           map.addLayer(
             {
-              id: 'locals-comic-building-fill',
+              id: 'locals-styled-building-fill',
               type: 'fill',
               source: sourceName,
               'source-layer': 'building',
@@ -927,30 +944,30 @@ function buildMapHtml(
                   'interpolate',
                   ['linear'],
                   ['coalesce', ['get', 'render_height'], 0],
-                  0, '#e0fbff',
-                  40, '#c7f3ff',
-                  120, '#ffe0f0',
-                  220, '#fff0b3'
+                  0, '${mapStyle.buildingLow}',
+                  40, '${mapStyle.buildingMid}',
+                  120, '${mapStyle.buildingHigh}',
+                  220, '${mapStyle.buildingTall}'
                 ],
-                'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.38, 16, 0.62]
+                'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.48, 16, 0.78]
               }
             },
             labelLayerId
           );
         }
 
-        if (!map.getLayer('locals-comic-building-outline')) {
+        if (!map.getLayer('locals-styled-building-outline')) {
           map.addLayer(
             {
-              id: 'locals-comic-building-outline',
+              id: 'locals-styled-building-outline',
               type: 'line',
               source: sourceName,
               'source-layer': 'building',
               minzoom: 13,
               paint: {
-                'line-color': '#152238',
-                'line-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.36, 16, 0.78],
-                'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 16, 1.8, 18, 2.4]
+                'line-color': '${appColors.text}',
+                'line-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.58, 16, 0.92],
+                'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.5, 16, 1.35, 18, 1.9]
               }
             },
             labelLayerId
@@ -959,7 +976,7 @@ function buildMapHtml(
       } catch (err) {
         postNativeMessage({
           type: 'map_error',
-          message: err && err.message ? err.message : String(err || 'Comic-Gebäude konnten nicht geladen werden')
+          message: err && err.message ? err.message : String(err || 'Karten-Gebäude konnten nicht geladen werden')
         });
       }
     }
@@ -983,10 +1000,10 @@ function buildMapHtml(
         'interpolate',
         ['linear'],
         ['coalesce', ['get', 'render_height'], 0],
-        0, '#bdf7ff',
-        40, '#8fe7ff',
-        120, '#ffb7d8',
-        220, '#ffe17a'
+        0, '${mapStyle.buildingLow}',
+        40, '${mapStyle.buildingMid}',
+        120, '${mapStyle.buildingHigh}',
+        220, '${mapStyle.buildingTall}'
       ];
       var extrusionHeight = [
         'interpolate',
@@ -1128,7 +1145,7 @@ function buildMapHtml(
       el.style.cssText = [
         'width:' + size + 'px',
         'height:' + size + 'px',
-        'border-radius:50%',
+        'border-radius:' + (size <= 16 ? 'var(--small-marker-radius)' : 'var(--marker-radius)'),
         'background:' + background,
         'border:' + border,
         'box-shadow:' + shadow,
@@ -1146,44 +1163,44 @@ function buildMapHtml(
 
       var styles = {
         transit: {
-          bg: 'linear-gradient(180deg,#fef9c3 0%,#fde68a 100%)',
-          border: '2px solid #152238',
-          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          bg: 'linear-gradient(135deg, rgba(0,240,255,0.2) 0%, #072c3a 100%)',
+          border: '1px solid var(--accent-blue)',
+          shadow: '0 0 12px rgba(0,240,255,0.42)',
           icon: '🚌',
           subtitle: 'Haltestelle'
         },
         school: {
-          bg: 'linear-gradient(180deg,#dbeafe 0%,#bfdbfe 100%)',
-          border: '2px solid #152238',
-          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          bg: 'linear-gradient(135deg, rgba(0,240,255,0.18) 0%, rgba(255,43,214,0.16) 100%)',
+          border: '1px solid var(--accent-blue)',
+          shadow: '0 0 12px rgba(0,240,255,0.38)',
           icon: '🏫',
           subtitle: 'Schule'
         },
         worship: {
-          bg: 'linear-gradient(180deg,#fee2e2 0%,#fecaca 100%)',
-          border: '2px solid #152238',
-          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          bg: 'linear-gradient(135deg, rgba(255,43,214,0.2) 0%, #2b1230 100%)',
+          border: '1px solid var(--accent-pink)',
+          shadow: '0 0 12px rgba(255,43,214,0.4)',
           icon: '⛪',
           subtitle: 'Kirche'
         },
         food: {
-          bg: 'linear-gradient(180deg,#ffedd5 0%,#fed7aa 100%)',
-          border: '2px solid #152238',
-          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          bg: 'linear-gradient(135deg, rgba(239,255,58,0.22) 0%, #2a2d10 100%)',
+          border: '1px solid var(--accent-yellow)',
+          shadow: '0 0 12px rgba(239,255,58,0.35)',
           icon: '🍽️',
           subtitle: 'Essen & Trinken'
         },
         shop: {
-          bg: 'linear-gradient(180deg,#e9d5ff 0%,#d8b4fe 100%)',
-          border: '2px solid #152238',
-          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          bg: 'linear-gradient(135deg, rgba(255,43,214,0.22) 0%, rgba(0,240,255,0.12) 100%)',
+          border: '1px solid var(--accent-pink)',
+          shadow: '0 0 12px rgba(255,43,214,0.38)',
           icon: '🛍️',
           subtitle: 'Shop'
         },
         green: {
-          bg: 'linear-gradient(180deg,#dcfce7 0%,#86efac 100%)',
-          border: '2px solid #152238',
-          shadow: '0 2px 0 rgba(21,34,56,0.28)',
+          bg: 'linear-gradient(135deg, rgba(0,255,178,0.24) 0%, #073523 100%)',
+          border: '1px solid var(--mint)',
+          shadow: '0 0 12px rgba(0,255,178,0.35)',
           icon: '🌳🌲🌳',
           subtitle: 'Grünfläche'
         }
@@ -1308,10 +1325,10 @@ function buildMapHtml(
 
       partyData.forEach(function(party) {
         var partyEl = markerEl(
-          28,
-          'linear-gradient(180deg,#c4b5fd 0%,${PARTY_COLORS.fill} 100%)',
-          '3px solid #152238',
-          '0 3px 0 rgba(21,34,56,0.35)',
+          32,
+          'linear-gradient(135deg, rgba(255,43,214,0.22) 0%,${PARTY_COLORS.fill} 100%)',
+          '1px solid var(--accent-pink)',
+          '0 0 18px ${PARTY_COLORS.shadow}',
           '🎉'
         );
         partyEl.style.cursor = 'pointer';
@@ -1377,9 +1394,9 @@ function buildMapHtml(
         party.members.forEach(function(m) {
           var mEl = markerEl(
             13,
-            'radial-gradient(circle at 35% 30%, #86efac 0%, #22c55e 80%)',
-            '2px solid #152238',
-            '0 2px 0 rgba(21,34,56,0.28)'
+            'linear-gradient(135deg, var(--mint) 0%, var(--accent-blue) 100%)',
+            '1px solid var(--ink)',
+            '0 0 10px rgba(0,255,178,0.45)'
           );
           mEl.style.display = 'none';
           pushMarker(new maplibregl.Marker({ element: mEl, anchor: 'center' })
@@ -1405,22 +1422,22 @@ function buildMapHtml(
         var el = null;
 
         if (showDatingMarker) {
-          var heartColor = u.intent === 'relationship' ? '#ef4444' : '#16a34a';
-          var heartBackground = u.intent === 'relationship' ? '#fee2e2' : '#dcfce7';
+          var heartColor = u.intent === 'relationship' ? '#ff3864' : '#00ffb2';
+          var heartBackground = u.intent === 'relationship' ? 'rgba(255,56,100,0.22)' : 'rgba(0,255,178,0.18)';
           el = markerEl(
             28,
-            'linear-gradient(180deg,#fff7ed 0%,' + heartBackground + ' 100%)',
-            '2px solid #152238',
-            '0 3px 0 rgba(21,34,56,0.32)',
+            'linear-gradient(135deg,rgba(7,19,31,0.96) 0%,' + heartBackground + ' 100%)',
+            '1px solid ' + heartColor,
+            '0 0 14px ' + heartBackground,
             '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + heartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
           );
         } else if (showFriendMarker) {
           var bubble = markerEl(
             28,
-            'linear-gradient(180deg,#f0fdf4 0%,#bbf7d0 100%)',
-            '2px solid #152238',
-            '0 3px 0 rgba(21,34,56,0.32)',
-            '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="#16a34a"/><circle cx="16" cy="8" r="3.2" fill="#22c55e"/><path fill="#16a34a" d="M2.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9H3.6c-.5 0-.9-.4-.8-.9z"/><path fill="#22c55e" d="M10.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9h-8.8c-.5 0-.9-.4-.8-.9z"/></svg>'
+            'linear-gradient(135deg,rgba(0,255,178,0.2) 0%,rgba(0,240,255,0.18) 100%)',
+            '1px solid var(--mint)',
+            '0 0 14px rgba(0,255,178,0.38)',
+            '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="#00ffb2"/><circle cx="16" cy="8" r="3.2" fill="#00f0ff"/><path fill="#00ffb2" d="M2.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9H3.6c-.5 0-.9-.4-.8-.9z"/><path fill="#00f0ff" d="M10.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9h-8.8c-.5 0-.9-.4-.8-.9z"/></svg>'
           );
           var wrap = document.createElement('div');
           wrap.className = 'friend-marker-wrap pulse';
@@ -1433,9 +1450,9 @@ function buildMapHtml(
         } else {
           el = markerEl(
             15,
-            'radial-gradient(circle at 35% 30%, #86efac 0%, #22c55e 78%)',
-            '2.5px solid #152238',
-            '0 2px 0 rgba(21,34,56,0.25)'
+            'linear-gradient(135deg, var(--mint) 0%, var(--accent-blue) 100%)',
+            '1px solid rgba(234,251,255,0.9)',
+            '0 0 12px rgba(0,255,178,0.42)'
           );
         }
         if (!showFriendMarker) {
@@ -1482,22 +1499,22 @@ function buildMapHtml(
       var meEl = null;
 
       if (myPresence === 'friend' || myPresence === 'relationship') {
-        var meHeartColor = myPresence === 'relationship' ? '#ef4444' : '#16a34a';
-        var meHeartBackground = myPresence === 'relationship' ? '#fee2e2' : '#dcfce7';
+        var meHeartColor = myPresence === 'relationship' ? '#ff3864' : '#00ffb2';
+        var meHeartBackground = myPresence === 'relationship' ? 'rgba(255,56,100,0.22)' : 'rgba(0,255,178,0.18)';
         mePopupText = myPresence === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde';
         meEl = markerEl(
           30,
-          'linear-gradient(180deg,#fff7ed 0%,' + meHeartBackground + ' 100%)',
-          '2px solid #152238',
-          '0 3px 0 rgba(21,34,56,0.35)',
+          'linear-gradient(135deg,rgba(7,19,31,0.96) 0%,' + meHeartBackground + ' 100%)',
+          '1px solid ' + meHeartColor,
+          '0 0 16px ' + meHeartBackground,
           '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + meHeartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
         );
       } else {
         meEl = markerEl(
           19,
-          'radial-gradient(circle at 35% 30%, #fca5a5 0%, #ef4444 78%)',
-          '3px solid #152238',
-          '0 3px 0 rgba(21,34,56,0.35)'
+          'linear-gradient(135deg, #ff3864 0%, #ff2bd6 100%)',
+          '1px solid var(--ink)',
+          '0 0 16px rgba(255,56,100,0.48)'
         );
       }
 
@@ -1516,7 +1533,7 @@ function buildMapHtml(
       var currentFilter = ${filterModeJson};
       var peopleOnly = currentFilter === 'people';
 
-      addComicBuildings();
+      addStyledBuildings();
       add3DBuildings();
       if (!peopleOnly) addLivePoiMarkers();
       addPartyAndMemberMarkers();
@@ -2073,9 +2090,16 @@ out center tags ${LIVE_POI_LIMIT};`;
           <Feather
             name="filter"
             size={17}
-            color={filterMenuOpen ? "#15803d" : Colors.light.text}
+            color={filterMenuOpen ? Colors.light.tint : Colors.light.tintBlue}
           />
-          <Text style={styles.filterButtonIcon}>{selectedFilter.icon}</Text>
+          <Text
+            style={[
+              styles.filterButtonIcon,
+              filterMenuOpen && styles.filterButtonIconActive,
+            ]}
+          >
+            {selectedFilter.icon}
+          </Text>
         </Pressable>
         {filterMenuOpen && (
           <View style={styles.filterDropdown}>
@@ -2099,7 +2123,14 @@ out center tags ${LIVE_POI_LIMIT};`;
                     setFilterMenuOpen(false);
                   }}
                 >
-                  <Text style={styles.filterIcon}>{option.icon}</Text>
+                  <Text
+                    style={[
+                      styles.filterIcon,
+                      selected && styles.filterIconActive,
+                    ]}
+                  >
+                    {option.icon}
+                  </Text>
                   <Text
                     style={[
                       styles.filterText,
@@ -2276,6 +2307,24 @@ out center tags ${LIVE_POI_LIMIT};`;
   );
 }
 
+const isNeonMapStyle = Colors.activeStyle.id === "neon";
+const mapPanelBackground = isNeonMapStyle
+  ? "rgba(7,19,31,0.94)"
+  : Colors.light.backgroundSecondary;
+const mapPanelActiveBackground = isNeonMapStyle
+  ? "rgba(255,43,214,0.18)"
+  : Colors.light.backgroundTertiary;
+const mapPanelBorder = Colors.light.separator;
+const mapPanelShadow = isNeonMapStyle ? Colors.light.tintBlue : "#000";
+const mapHeaderBackground = isNeonMapStyle ? "rgba(2,7,13,0.88)" : Colors.light.backgroundSecondary;
+const activeBadgeBackground = isNeonMapStyle ? "rgba(0,255,178,0.13)" : Colors.light.backgroundTertiary;
+const activeBadgeColor = Colors.light.mint;
+const countBadgeBackground = isNeonMapStyle ? "rgba(0,240,255,0.12)" : Colors.light.backgroundTertiary;
+const countBadgeActiveBackground = isNeonMapStyle ? "rgba(255,43,214,0.2)" : Colors.light.backgroundTertiary;
+const countBadgeActiveColor = Colors.light.tint;
+const partyAccent = Colors.light.tint;
+const partyAccentSoft = isNeonMapStyle ? "rgba(255,43,214,0.12)" : Colors.light.backgroundTertiary;
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.light.background },
 
@@ -2288,25 +2337,25 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingBottom: 12,
-    backgroundColor: "rgba(255,249,236,0.94)",
-    borderBottomWidth: 2,
-    borderBottomColor: "#17172a",
+    backgroundColor: mapHeaderBackground,
+    borderBottomWidth: Colors.shape.borderWidthThin,
+    borderBottomColor: mapPanelBorder,
   },
   headerTitle: {
     fontSize: 20, fontWeight: "700",
-    color: "#17172a",
+    color: Colors.light.text,
   },
   headerRight: { flexDirection: "row", gap: 8 },
 
   badge: {
     flexDirection: "row", alignItems: "center", gap: 5,
-    backgroundColor: "#dcfce7",
+    backgroundColor: activeBadgeBackground,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
-    borderWidth: 2,
-    borderColor: "#17172a",
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: isNeonMapStyle ? Colors.light.mint : mapPanelBorder,
   },
-  badgeDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#22c55e" },
-  badgeText: { fontSize: 12, fontWeight: "600", color: "#16a34a" },
+  badgeDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.light.mint },
+  badgeText: { fontSize: 12, fontWeight: "600", color: activeBadgeColor },
 
   map: { flex: 1 },
 
@@ -2319,10 +2368,10 @@ const styles = StyleSheet.create({
   presenceButton: {
     width: 76,
     minHeight: 40,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#17172a",
-    backgroundColor: "rgba(255,249,236,0.97)",
+    borderRadius: Colors.shape.radiusSm,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+    backgroundColor: mapPanelBackground,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -2330,8 +2379,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   presenceButtonActive: {
-    borderColor: "#17172a",
-    backgroundColor: "#ffe4e6",
+    borderColor: Colors.light.tint,
+    backgroundColor: mapPanelActiveBackground,
   },
   presenceButtonIcon: {
     width: 22,
@@ -2343,12 +2392,12 @@ const styles = StyleSheet.create({
     width: 190,
     marginTop: 8,
     borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#17172a",
-    backgroundColor: "rgba(255,249,236,0.98)",
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+    backgroundColor: mapPanelBackground,
     padding: 6,
     gap: 4,
-    shadowColor: "#000",
+    shadowColor: mapPanelShadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.16,
     shadowRadius: 8,
@@ -2378,10 +2427,10 @@ const styles = StyleSheet.create({
   filterButton: {
     width: 76,
     minHeight: 40,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#17172a",
-    backgroundColor: "rgba(255,249,236,0.97)",
+    borderRadius: Colors.shape.radiusSm,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+    backgroundColor: mapPanelBackground,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -2389,8 +2438,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   filterButtonActive: {
-    borderColor: "#17172a",
-    backgroundColor: "#ecfdf5",
+    borderColor: Colors.light.tint,
+    backgroundColor: mapPanelActiveBackground,
   },
   filterButtonText: {
     fontSize: 13,
@@ -2399,21 +2448,24 @@ const styles = StyleSheet.create({
   },
   filterButtonIcon: {
     width: 22,
-    fontSize: 16,
-    fontWeight: "800",
-    color: Colors.light.text,
+    fontSize: 17,
+    fontWeight: "900",
+    color: Colors.light.tintBlue,
     textAlign: "center",
+  },
+  filterButtonIconActive: {
+    color: Colors.light.tint,
   },
   filterDropdown: {
     width: 190,
     marginTop: 8,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#17172a",
-    backgroundColor: "rgba(255,249,236,0.98)",
+    borderRadius: Colors.shape.radiusSm,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+    backgroundColor: mapPanelBackground,
     padding: 6,
     gap: 4,
-    shadowColor: "#000",
+    shadowColor: mapPanelShadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.16,
     shadowRadius: 8,
@@ -2428,10 +2480,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
   },
   filterOptionActive: {
-    backgroundColor: "#dcfce7",
+    backgroundColor: isNeonMapStyle ? "rgba(0,240,255,0.13)" : Colors.light.backgroundTertiary,
   },
   filterIcon: {
-    fontSize: 14,
+    width: 18,
+    fontSize: 15,
+    color: Colors.light.tintBlue,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  filterIconActive: {
+    color: Colors.light.tint,
   },
   filterText: {
     flex: 1,
@@ -2440,14 +2499,14 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
   },
   filterTextActive: {
-    color: "#15803d",
+    color: isNeonMapStyle ? Colors.light.tintBlue : Colors.light.mint,
   },
   filterCount: {
     minWidth: 20,
     height: 20,
     borderRadius: 6,
     overflow: "hidden",
-    backgroundColor: "#e5e7eb",
+    backgroundColor: countBadgeBackground,
     color: Colors.light.textSecondary,
     fontSize: 11,
     fontWeight: "700",
@@ -2455,8 +2514,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   filterCountActive: {
-    backgroundColor: "#86efac",
-    color: "#166534",
+    backgroundColor: countBadgeActiveBackground,
+    color: countBadgeActiveColor,
   },
 
   loading: {
@@ -2468,12 +2527,12 @@ const styles = StyleSheet.create({
   partyComposer: {
     position: "absolute",
     left: 16,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,249,236,0.98)",
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: mapPanelBackground,
     overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "#17172a",
-    shadowColor: "#000",
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+    shadowColor: mapPanelShadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 8,
@@ -2485,10 +2544,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#7c3aed",
+    backgroundColor: partyAccent,
     paddingHorizontal: 14,
     borderBottomWidth: 2,
-    borderBottomColor: "#17172a",
+    borderBottomColor: mapPanelBorder,
   },
   partyComposerHeaderClosed: {
     justifyContent: "center",
@@ -2577,8 +2636,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   memberOptionSelected: {
-    borderColor: "#8B5CF6",
-    backgroundColor: "#f5f3ff",
+    borderColor: partyAccent,
+    backgroundColor: partyAccentSoft,
   },
   memberOptionAvatar: {
     width: 22,
@@ -2593,14 +2652,14 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
   },
   memberOptionNameSelected: {
-    color: "#7C3AED",
+    color: partyAccent,
   },
   partyCreateButton: {
     height: 38,
     borderRadius: 8,
-    backgroundColor: "#7c3aed",
-    borderWidth: 2,
-    borderColor: "#17172a",
+    backgroundColor: partyAccent,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2643,7 +2702,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.backgroundSecondary,
   },
   createBtn: {
-    backgroundColor: "#8B5CF6",
+    backgroundColor: partyAccent,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",

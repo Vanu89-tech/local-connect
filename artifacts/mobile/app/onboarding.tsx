@@ -49,7 +49,7 @@ export default function OnboardingScreen() {
             <Feather name="map-pin" size={22} color="#FFFFFF" />
           </View>
           <View style={[styles.bubble, styles.bubbleCenter]}>
-            <Feather name="message-circle" size={28} color="#FFFFFF" />
+            <Feather name="message-circle" size={28} color={Colors.light.onPrimary} />
           </View>
           <View style={[styles.bubble, styles.bubbleRight]}>
             <Feather name="users" size={20} color="#FFFFFF" />

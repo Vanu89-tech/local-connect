@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -20,6 +20,13 @@ import Colors from "@/constants/colors";
 import { Party, User, useApp } from "@/context/AppContext";
 
 const TAB_BAR_OVERLAY_HEIGHT = 84;
+const isNeonMessagesStyle = Colors.activeStyle.id === "neon";
+const partyThreadSurface = isNeonMessagesStyle
+  ? "rgba(255,43,214,0.18)"
+  : Colors.light.backgroundTertiary;
+const utilityButtonSurface = isNeonMessagesStyle
+  ? "rgba(0,240,255,0.12)"
+  : Colors.light.backgroundTertiary;
 
 type ChatMessage = {
   id: string;
@@ -219,6 +226,8 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const [draft, setDraft] = useState("");
+  const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
+  const scrollRef = useRef<ScrollView>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -261,6 +270,20 @@ export default function HomeScreen() {
     );
   }, [threads]);
 
+  const handleSend = () => {
+    if (!draft.trim() || !selectedThread) return;
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const now = new Date();
+    const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    const msg: ChatMessage = { id: `local-${Date.now()}`, senderId: "me", text: draft.trim(), time };
+    setLocalMessages((prev) => ({
+      ...prev,
+      [selectedThread.id]: [...(prev[selectedThread.id] ?? []), msg],
+    }));
+    setDraft("");
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+  };
+
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return contacts;
@@ -302,13 +325,13 @@ export default function HomeScreen() {
           style={({ pressed }) => [styles.homeModeBtn, { opacity: pressed ? 0.7 : 1 }]}
           onPress={() => router.push("/presence-choice")}
         >
-          <Feather name="home" size={22} color={Colors.light.text} />
+          <Feather name="home" size={22} color={Colors.light.onBright} />
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.searchBtn, { opacity: pressed ? 0.7 : 1 }]}
           onPress={openSearch}
         >
-          <Feather name="search" size={21} color={Colors.light.text} />
+          <Feather name="search" size={21} color={Colors.light.onBright} />
         </Pressable>
       </View>
 
@@ -375,11 +398,12 @@ export default function HomeScreen() {
           </View>
 
           <ScrollView
+            ref={scrollRef}
             style={styles.messages}
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
           >
-            {selectedThread.messages.map((message) => {
+            {[...selectedThread.messages, ...(localMessages[selectedThread.id] ?? [])].map((message) => {
               const mine = message.senderId === currentUser.id || message.senderId === "me";
               return (
                 <View
@@ -413,7 +437,10 @@ export default function HomeScreen() {
                 placeholderTextColor={Colors.light.textTertiary}
                 style={styles.input}
               />
-              <Pressable style={({ pressed }) => [styles.sendBtn, { opacity: pressed ? 0.82 : 1 }]}>
+              <Pressable
+                style={({ pressed }) => [styles.sendBtn, { opacity: pressed ? 0.82 : 1 }]}
+                onPress={handleSend}
+              >
                 <Feather name="send" size={17} color="#FFFFFF" />
               </Pressable>
             </View>
@@ -427,7 +454,7 @@ export default function HomeScreen() {
             <View style={styles.searchPanelHeader}>
               <Text style={styles.searchTitle}>Profile suchen</Text>
               <Pressable style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.72 : 1 }]} onPress={closeSearch}>
-                <Feather name="x" size={20} color={Colors.light.text} />
+                <Feather name="x" size={20} color={Colors.light.onBright} />
               </Pressable>
             </View>
 
@@ -457,7 +484,7 @@ export default function HomeScreen() {
                       @{contact.username} · {contact.status}
                     </Text>
                   </View>
-                  <Feather name="message-circle" size={19} color={Colors.light.comicPink} />
+                  <Feather name="message-circle" size={19} color={Colors.light.tint} />
                 </Pressable>
               ))}
               {!searchResults.length ? (
@@ -487,40 +514,40 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     backgroundColor: Colors.light.background,
     borderBottomWidth: 3,
-    borderBottomColor: Colors.light.comicInk,
+    borderBottomColor: Colors.light.text,
   },
   homeModeBtn: {
     width: 44,
     height: 44,
-    borderRadius: 8,
+    borderRadius: Colors.shape.radiusSm,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.light.comicYellow,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
-    shadowColor: Colors.light.comicInk,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.22,
-    shadowRadius: 0,
+    backgroundColor: Colors.light.yellow,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
+    shadowColor: Colors.shadow.color,
+    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
+    shadowOpacity: Colors.shadow.opacity,
+    shadowRadius: Colors.shadow.radius,
   },
   searchBtn: {
     width: 44,
     height: 44,
-    borderRadius: 8,
+    borderRadius: Colors.shape.radiusSm,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.light.comicYellow,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
-    shadowColor: Colors.light.comicInk,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.22,
-    shadowRadius: 0,
+    backgroundColor: Colors.light.yellow,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
+    shadowColor: Colors.shadow.color,
+    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
+    shadowOpacity: Colors.shadow.opacity,
+    shadowRadius: Colors.shadow.radius,
   },
   peopleWrap: {
-    backgroundColor: "#DFF4FF",
+    backgroundColor: Colors.light.backgroundTertiary,
     borderBottomWidth: 3,
-    borderBottomColor: Colors.light.comicInk,
+    borderBottomColor: Colors.light.text,
   },
   peopleList: {
     paddingHorizontal: 14,
@@ -541,22 +568,22 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 32,
     padding: 3,
-    borderWidth: 3,
-    borderColor: Colors.light.comicInk,
-    backgroundColor: "#FFFFFF",
-    shadowColor: Colors.light.comicInk,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.22,
-    shadowRadius: 0,
+    borderWidth: Colors.shape.borderWidth,
+    borderColor: Colors.light.text,
+    backgroundColor: Colors.light.backgroundSecondary,
+    shadowColor: Colors.shadow.color,
+    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
+    shadowOpacity: Colors.shadow.opacity,
+    shadowRadius: Colors.shadow.radius,
   },
   avatarRingSelected: {
-    borderColor: Colors.light.comicPink,
-    backgroundColor: Colors.light.comicYellow,
+    borderColor: Colors.light.tint,
+    backgroundColor: Colors.light.yellow,
   },
   partyRing: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#E9D5FF",
+    backgroundColor: partyThreadSurface,
   },
   partyThreadIcon: {
     fontSize: 28,
@@ -575,12 +602,12 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    borderWidth: 2,
+    borderWidth: Colors.shape.borderWidthThin,
     borderColor: Colors.light.background,
-    backgroundColor: Colors.light.comicMint,
+    backgroundColor: Colors.light.mint,
   },
   partyDot: {
-    backgroundColor: Colors.light.comicPink,
+    backgroundColor: Colors.light.tint,
   },
   personName: {
     maxWidth: 68,
@@ -599,22 +626,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 14,
     gap: 11,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.light.backgroundSecondary,
     borderBottomWidth: 3,
-    borderBottomColor: Colors.light.comicInk,
+    borderBottomColor: Colors.light.text,
   },
   chatAvatar: {
     width: 46,
     height: 46,
     borderRadius: 23,
     backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
   },
   chatPartyAvatar: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#E9D5FF",
+    backgroundColor: partyThreadSurface,
   },
   chatPartyIcon: {
     fontSize: 24,
@@ -640,12 +667,12 @@ const styles = StyleSheet.create({
   moreBtn: {
     width: 36,
     height: 36,
-    borderRadius: 8,
+    borderRadius: Colors.shape.radiusSm,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F7ECFF",
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
+    backgroundColor: utilityButtonSurface,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
   },
   messages: {
     flex: 1,
@@ -669,21 +696,21 @@ const styles = StyleSheet.create({
   },
   bubble: {
     maxWidth: "78%",
-    borderRadius: 8,
+    borderRadius: Colors.shape.radiusSm,
     paddingHorizontal: 13,
     paddingVertical: 10,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
-    shadowColor: Colors.light.comicInk,
-    shadowOffset: { width: 0, height: 3 },
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
+    shadowColor: Colors.shadow.color,
+    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
     shadowOpacity: 0.18,
-    shadowRadius: 0,
+    shadowRadius: Colors.shadow.radius,
   },
   bubbleMine: {
-    backgroundColor: Colors.light.comicPink,
+    backgroundColor: Colors.light.tint,
   },
   bubbleTheirs: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.light.tintBlue,
   },
   messageText: {
     fontSize: 15,
@@ -695,7 +722,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   messageTextTheirs: {
-    color: Colors.light.text,
+    color: Colors.light.onBright,
   },
   messageTime: {
     marginTop: 5,
@@ -714,20 +741,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 10,
     borderTopWidth: 3,
-    borderTopColor: Colors.light.comicInk,
-    backgroundColor: "#DFF4FF",
+    borderTopColor: Colors.light.text,
+    backgroundColor: Colors.light.backgroundTertiary,
   },
   inputWrap: {
     minHeight: 48,
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: Colors.light.backgroundSecondary,
     flexDirection: "row",
     alignItems: "center",
     paddingLeft: 14,
     paddingRight: 6,
     gap: 8,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
   },
   input: {
     flex: 1,
@@ -740,12 +767,12 @@ const styles = StyleSheet.create({
   sendBtn: {
     width: 38,
     height: 38,
-    borderRadius: 8,
-    backgroundColor: Colors.light.comicBlue,
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: Colors.light.tint,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
   },
   searchOverlay: {
     flex: 1,
@@ -755,14 +782,14 @@ const styles = StyleSheet.create({
   },
   searchPanel: {
     maxHeight: "72%",
-    borderRadius: 8,
-    borderWidth: 3,
-    borderColor: Colors.light.comicInk,
+    borderRadius: Colors.shape.radiusSm,
+    borderWidth: Colors.shape.borderWidth,
+    borderColor: Colors.light.text,
     backgroundColor: Colors.light.background,
-    shadowColor: Colors.light.comicInk,
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.28,
-    shadowRadius: 0,
+    shadowColor: Colors.shadow.color,
+    shadowOffset: { width: 0, height: Colors.shadow.offsetY + 4 },
+    shadowOpacity: Colors.shadow.opacity + 0.06,
+    shadowRadius: Colors.shadow.radius,
     overflow: "hidden",
   },
   searchPanelHeader: {
@@ -772,36 +799,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 3,
-    borderBottomColor: Colors.light.comicInk,
-    backgroundColor: "#DFF4FF",
+    borderBottomColor: Colors.light.text,
+    backgroundColor: Colors.light.backgroundTertiary,
   },
   searchTitle: {
     fontSize: 22,
     fontFamily: "Inter_700Bold",
     color: Colors.light.text,
     letterSpacing: 0,
-    textShadowColor: Colors.light.comicYellow,
+    textShadowColor: Colors.typography.displayShadowColor,
     textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 0,
+    textShadowRadius: Colors.typography.displayShadowRadius,
   },
   closeBtn: {
     width: 34,
     height: 34,
-    borderRadius: 8,
+    borderRadius: Colors.shape.radiusSm,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
-    backgroundColor: Colors.light.comicYellow,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
+    backgroundColor: Colors.light.yellow,
   },
   profileSearchInputWrap: {
     minHeight: 50,
     margin: 14,
     paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
-    backgroundColor: "#FFFFFF",
+    borderRadius: Colors.shape.radiusSm,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
+    backgroundColor: Colors.light.backgroundSecondary,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
@@ -824,10 +851,10 @@ const styles = StyleSheet.create({
   },
   searchResult: {
     minHeight: 68,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
-    backgroundColor: "#FFFFFF",
+    borderRadius: Colors.shape.radiusSm,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
+    backgroundColor: Colors.light.backgroundSecondary,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
@@ -837,8 +864,8 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    borderWidth: 2,
-    borderColor: Colors.light.comicInk,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.text,
     backgroundColor: Colors.light.backgroundSecondary,
   },
   searchResultText: {

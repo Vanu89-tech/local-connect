@@ -86,7 +86,7 @@ export default function PresenceChoiceScreen() {
           ) : (
             <>
               <View style={[styles.iconBadge, styles.homeIconBadge]}>
-                <Feather name="home" size={48} color={Colors.light.comicInk} />
+                <Feather name="home" size={48} color={Colors.light.onBright} />
               </View>
               <Text style={[styles.modeTitle, styles.homeModeTitle]}>Daheim</Text>
               <Text style={[styles.modeText, styles.homeModeText]}>Passiv schauen</Text>
@@ -105,6 +105,8 @@ export default function PresenceChoiceScreen() {
     </View>
   );
 }
+
+const isNeonStyle = Colors.activeStyle.id === "neon";
 
 const styles = StyleSheet.create({
   container: {
@@ -130,9 +132,9 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: Colors.light.primary,
     letterSpacing: 0,
-    textShadowColor: Colors.light.comicYellow,
-    textShadowOffset: { width: 3, height: 3 },
-    textShadowRadius: 0,
+    textShadowColor: Colors.typography.displayShadowColor,
+    textShadowOffset: Colors.typography.displayShadowOffset,
+    textShadowRadius: Colors.typography.displayShadowRadius,
   },
   subtitle: {
     maxWidth: 300,
@@ -150,32 +152,32 @@ const styles = StyleSheet.create({
   modeButton: {
     width: 218,
     height: 218,
-    borderRadius: 109,
+    borderRadius: isNeonStyle ? Colors.shape.radiusLg : 109,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    borderWidth: 4,
-    borderColor: Colors.light.comicInk,
-    shadowColor: Colors.light.comicInk,
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.28,
-    shadowRadius: 0,
+    borderWidth: Colors.shape.borderWidth + 1,
+    borderColor: Colors.light.text,
+    shadowColor: Colors.shadow.color,
+    shadowOffset: { width: 0, height: Colors.shadow.offsetY + 4 },
+    shadowOpacity: Colors.shadow.opacity + 0.06,
+    shadowRadius: Colors.shadow.radius,
   },
   onlineButton: {
-    backgroundColor: Colors.light.comicPink,
+    backgroundColor: Colors.light.tint,
   },
   homeButton: {
-    backgroundColor: Colors.light.comicYellow,
+    backgroundColor: Colors.light.yellow,
   },
   iconBadge: {
     width: 92,
     height: 92,
-    borderRadius: 46,
+    borderRadius: isNeonStyle ? Colors.shape.radiusLg : 46,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(21,34,56,0.18)",
-    borderWidth: 3,
-    borderColor: Colors.light.comicInk,
+    borderWidth: Colors.shape.borderWidth,
+    borderColor: Colors.light.text,
   },
   homeIconBadge: {
     backgroundColor: "#FFFFFF",
@@ -187,7 +189,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   homeModeTitle: {
-    color: Colors.light.comicInk,
+    color: Colors.light.onBright,
   },
   modeText: {
     fontSize: 14,
@@ -197,7 +199,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   homeModeText: {
-    color: Colors.light.comicInk,
+    color: Colors.light.onBright,
   },
   footer: {
     flexDirection: "row",

@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: 13,
     fontFamily: "Inter_500Medium",
-    color: "#16a34a",
+    color: Colors.light.mint,
     textAlign: "center",
     lineHeight: 18,
   },

@@ -1,34 +1,36 @@
-const primary = "#152238";
-const accent = "#FF4D8F";
-const accentBlue = "#21C7D9";
-const paper = "#F2FBFF";
-const ink = "#152238";
-const sunny = "#FFD84D";
+import { activeGraphicStyle } from "./graphicStyles";
+
+const style = activeGraphicStyle;
+const palette = style.colors;
 
 export default {
+  activeStyle: style,
   light: {
-    text: ink,
-    textSecondary: "#42526D",
-    textTertiary: "#7890A8",
-    background: paper,
-    backgroundSecondary: "#FFFFFF",
-    backgroundTertiary: "#DFF4FF",
-    tint: accent,
-    tintBlue: accentBlue,
-    primary,
-    separator: "#152238",
-    card: "#FFFFFF",
-    cardBorder: "#152238",
-    tabIconDefault: "#7890A8",
-    tabIconSelected: accent,
-    like: accent,
-    commentIcon: accentBlue,
-    placeholder: "#B8C7D8",
-    comicInk: ink,
-    comicPaper: paper,
-    comicPink: accent,
-    comicBlue: accentBlue,
-    comicYellow: sunny,
-    comicMint: "#22C55E",
+    text: palette.ink,
+    textSecondary: palette.textSecondary,
+    textTertiary: palette.textTertiary,
+    background: palette.paper,
+    backgroundSecondary: palette.surface,
+    backgroundTertiary: palette.surfaceAlt,
+    tint: palette.accent,
+    tintBlue: palette.accentBlue,
+    primary: palette.primary,
+    separator: palette.separator,
+    card: palette.card,
+    cardBorder: palette.separator,
+    tabIconDefault: palette.tabIconDefault,
+    tabIconSelected: palette.accent,
+    like: palette.accent,
+    commentIcon: palette.accentBlue,
+    placeholder: palette.placeholder,
+    danger: palette.danger,
+    onBright: palette.onBright,
+    onPrimary: palette.onPrimary,
+    yellow: palette.yellow,
+    mint: palette.mint,
   },
+  shape: style.shape,
+  shadow: style.shadow,
+  typography: style.typography,
+  map: style.map,
 };

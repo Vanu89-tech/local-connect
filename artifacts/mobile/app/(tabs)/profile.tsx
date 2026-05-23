@@ -263,6 +263,6 @@ const styles = StyleSheet.create({
   emptyBtnText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+    color: Colors.light.onPrimary,
   },
 });
