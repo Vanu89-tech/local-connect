@@ -38,22 +38,19 @@ export default function PresenceChoiceScreen() {
   const placeName = currentLocationName ?? homeLocation?.name ?? "Daheim";
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 36 }]}>
+    <View style={[styles.container, { paddingTop: insets.top + 30 }]}>
       <View style={styles.copy}>
-        <Text style={styles.kicker}>Wie möchtest du starten?</Text>
+        <Text style={styles.kicker}>Startmodus</Text>
         <Text style={styles.title}>Locals</Text>
-        <Text style={styles.subtitle}>
-          Online macht dich aktiv sichtbar. Daheim lässt dich lesen und schauen,
-          ohne selbst aktiv aufzutauchen.
-        </Text>
+        <Text style={styles.subtitle}>Wähle, wie du heute auf der Karte auftauchst.</Text>
       </View>
 
       <View style={styles.choices}>
         <Pressable
           style={({ pressed }) => [
-            styles.choice,
-            styles.onlineChoice,
-            { opacity: pressed ? 0.86 : 1 },
+            styles.modeButton,
+            styles.onlineButton,
+            { opacity: pressed ? 0.88 : 1, transform: [{ translateY: pressed ? 3 : 0 }] },
           ]}
           disabled={!!loadingMode}
           onPress={() => {
@@ -64,22 +61,20 @@ export default function PresenceChoiceScreen() {
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <>
-              <View style={styles.dot}>
-                <Feather name="radio" size={34} color="#FFFFFF" />
+              <View style={styles.iconBadge}>
+                <Feather name="radio" size={48} color="#FFFFFF" />
               </View>
-              <Text style={styles.choiceTitle}>Online</Text>
-              <Text style={styles.choiceText}>
-                Du kannst posten, liken, Parties starten und auf der Karte aktiv sein.
-              </Text>
+              <Text style={styles.modeTitle}>Online</Text>
+              <Text style={styles.modeText}>Aktiv sichtbar</Text>
             </>
           )}
         </Pressable>
 
         <Pressable
           style={({ pressed }) => [
-            styles.choice,
-            styles.homeChoice,
-            { opacity: pressed ? 0.86 : 1 },
+            styles.modeButton,
+            styles.homeButton,
+            { opacity: pressed ? 0.88 : 1, transform: [{ translateY: pressed ? 3 : 0 }] },
           ]}
           disabled={!!loadingMode}
           onPress={() => {
@@ -90,13 +85,11 @@ export default function PresenceChoiceScreen() {
             <ActivityIndicator color={Colors.light.primary} />
           ) : (
             <>
-              <View style={[styles.dot, styles.homeDot]}>
-                <Feather name="home" size={34} color={Colors.light.primary} />
+              <View style={[styles.iconBadge, styles.homeIconBadge]}>
+                <Feather name="home" size={48} color={Colors.light.comicInk} />
               </View>
-              <Text style={[styles.choiceTitle, styles.homeTitle]}>Daheim</Text>
-              <Text style={[styles.choiceText, styles.homeText]}>
-                Du siehst Posts und Karte, bleibst aber passiv und erscheinst offline.
-              </Text>
+              <Text style={[styles.modeTitle, styles.homeModeTitle]}>Daheim</Text>
+              <Text style={[styles.modeText, styles.homeModeText]}>Passiv schauen</Text>
             </>
           )}
         </Pressable>
@@ -117,79 +110,101 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.light.background,
-    paddingHorizontal: 24,
+    paddingHorizontal: 22,
     justifyContent: "center",
-    gap: 36,
+    gap: 28,
   },
   copy: {
-    gap: 10,
+    alignItems: "center",
+    gap: 8,
   },
   kicker: {
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
     color: Colors.light.tint,
+    letterSpacing: 0,
+    textTransform: "uppercase",
   },
   title: {
-    fontSize: 44,
+    fontSize: 50,
     fontFamily: "Inter_700Bold",
     color: Colors.light.primary,
+    letterSpacing: 0,
+    textShadowColor: Colors.light.comicYellow,
+    textShadowOffset: { width: 3, height: 3 },
+    textShadowRadius: 0,
   },
   subtitle: {
+    maxWidth: 300,
     fontSize: 16,
     fontFamily: "Inter_400Regular",
     color: Colors.light.textSecondary,
-    lineHeight: 24,
+    lineHeight: 23,
+    textAlign: "center",
+    letterSpacing: 0,
   },
   choices: {
-    gap: 16,
+    alignItems: "center",
+    gap: 22,
   },
-  choice: {
-    minHeight: 178,
-    borderRadius: 8,
-    padding: 22,
-    justifyContent: "center",
-    gap: 12,
-  },
-  onlineChoice: {
-    backgroundColor: Colors.light.primary,
-  },
-  homeChoice: {
-    backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: 1,
-    borderColor: Colors.light.separator,
-  },
-  dot: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+  modeButton: {
+    width: 218,
+    height: 218,
+    borderRadius: 109,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.16)",
+    gap: 8,
+    borderWidth: 4,
+    borderColor: Colors.light.comicInk,
+    shadowColor: Colors.light.comicInk,
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.28,
+    shadowRadius: 0,
   },
-  homeDot: {
-    backgroundColor: Colors.light.background,
+  onlineButton: {
+    backgroundColor: Colors.light.comicPink,
   },
-  choiceTitle: {
-    fontSize: 28,
+  homeButton: {
+    backgroundColor: Colors.light.comicYellow,
+  },
+  iconBadge: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(21,34,56,0.18)",
+    borderWidth: 3,
+    borderColor: Colors.light.comicInk,
+  },
+  homeIconBadge: {
+    backgroundColor: "#FFFFFF",
+  },
+  modeTitle: {
+    fontSize: 34,
     fontFamily: "Inter_700Bold",
     color: "#FFFFFF",
+    letterSpacing: 0,
   },
-  homeTitle: {
-    color: Colors.light.primary,
+  homeModeTitle: {
+    color: Colors.light.comicInk,
   },
-  choiceText: {
+  modeText: {
     fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.82)",
-    lineHeight: 20,
+    fontFamily: "Inter_700Bold",
+    color: "rgba(255,255,255,0.9)",
+    letterSpacing: 0,
+    textTransform: "uppercase",
   },
-  homeText: {
-    color: Colors.light.textSecondary,
+  homeModeText: {
+    color: Colors.light.comicInk,
   },
   footer: {
     flexDirection: "row",
     alignItems: "center",
+    alignSelf: "center",
     gap: 8,
+    maxWidth: 320,
     paddingBottom: Platform.OS === "ios" ? 8 : 0,
   },
   footerText: {

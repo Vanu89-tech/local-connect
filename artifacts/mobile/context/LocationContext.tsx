@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -180,26 +181,38 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const effectivePresenceMode: AppPresenceMode =
     locationMode === "home" ? "home" : appPresenceMode;
 
-  return (
-    <LocationContext.Provider
-      value={{
-        locationMode,
-        appPresenceMode,
-        effectivePresenceMode,
-        currentLocationName,
-        homeLocation,
-        gpsGranted,
-        hasCompletedSetup,
-        hasSelectedStartMode,
-        setHomeLocation,
-        chooseStartMode,
-        requestGpsPermission,
-        refreshLocation,
-      }}
-    >
-      {children}
-    </LocationContext.Provider>
+  const value = useMemo<LocationContextType>(
+    () => ({
+      locationMode,
+      appPresenceMode,
+      effectivePresenceMode,
+      currentLocationName,
+      homeLocation,
+      gpsGranted,
+      hasCompletedSetup,
+      hasSelectedStartMode,
+      setHomeLocation,
+      chooseStartMode,
+      requestGpsPermission,
+      refreshLocation,
+    }),
+    [
+      locationMode,
+      appPresenceMode,
+      effectivePresenceMode,
+      currentLocationName,
+      homeLocation,
+      gpsGranted,
+      hasCompletedSetup,
+      hasSelectedStartMode,
+      setHomeLocation,
+      chooseStartMode,
+      requestGpsPermission,
+      refreshLocation,
+    ],
   );
+
+  return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;
 }
 
 export function useLocation() {

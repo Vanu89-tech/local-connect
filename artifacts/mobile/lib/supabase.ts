@@ -15,10 +15,25 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+const supabaseFetch: typeof fetch = async (input, init) => {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    console.warn("Supabase network request failed", error);
+    return new Response(JSON.stringify({ message: "Supabase network unavailable" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+};
+
 export const supabase = createClient(
   supabaseUrl ?? fallbackSupabaseUrl,
   supabaseAnonKey ?? fallbackSupabaseAnonKey,
   {
+    global: {
+      fetch: supabaseFetch,
+    },
     auth: {
       storage: AsyncStorage,
       autoRefreshToken: true,

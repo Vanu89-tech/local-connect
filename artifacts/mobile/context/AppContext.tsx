@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
@@ -346,6 +347,45 @@ function mapProfileToUser(profile: ProfileRow): User {
   };
 }
 
+function areUsersEqual(a: User, b: User): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.username === b.username &&
+    a.avatar === b.avatar &&
+    a.bio === b.bio &&
+    a.location === b.location &&
+    a.followersCount === b.followersCount &&
+    a.followingCount === b.followingCount &&
+    a.postsCount === b.postsCount
+  );
+}
+
+function arePostsEqual(a: Post[], b: Post[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.userId !== y.userId ||
+      x.content !== y.content ||
+      x.imageUrl !== y.imageUrl ||
+      x.location !== y.location ||
+      x.likesCount !== y.likesCount ||
+      x.commentsCount !== y.commentsCount ||
+      x.liked !== y.liked ||
+      x.category !== y.category ||
+      x.status !== y.status ||
+      x.createdAt !== y.createdAt ||
+      !areUsersEqual(x.user, y.user)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [posts, setPosts] = useState<Post[]>(SEED_POSTS);
@@ -416,34 +456,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
     const likedPostIds = new Set((likedRows ?? []).map((like) => like.post_id));
 
-    setPosts(
-      (postRows ?? []).map((post) => {
-        const author =
-          profilesById.get(post.author_id) ??
-          ({
-            ...ME,
-            id: post.author_id,
-            name: "Local",
-            username: post.author_id.slice(0, 8),
-            avatar: makeAvatarUrl(post.author_id),
-          } satisfies User);
+    const nextPosts = (postRows ?? []).map((post) => {
+      const author =
+        profilesById.get(post.author_id) ??
+        ({
+          ...ME,
+          id: post.author_id,
+          name: "Local",
+          username: post.author_id.slice(0, 8),
+          avatar: makeAvatarUrl(post.author_id),
+        } satisfies User);
 
-        return {
-          id: post.id,
-          userId: post.author_id,
-          user: author,
-          content: post.content,
-          imageUrl: post.image_url ?? undefined,
-          location: post.location_name,
-          likesCount: post.likes_count,
-          commentsCount: post.comments_count,
-          liked: likedPostIds.has(post.id),
-          category: post.category ?? "general",
-          status: post.status ?? "visible",
-          createdAt: post.created_at,
-        };
-      }),
-    );
+      return {
+        id: post.id,
+        userId: post.author_id,
+        user: author,
+        content: post.content,
+        imageUrl: post.image_url ?? undefined,
+        location: post.location_name,
+        likesCount: post.likes_count,
+        commentsCount: post.comments_count,
+        liked: likedPostIds.has(post.id),
+        category: post.category ?? "general",
+        status: post.status ?? "visible",
+        createdAt: post.created_at,
+      };
+    });
+
+    setPosts((prev) => (arePostsEqual(prev, nextPosts) ? prev : nextPosts));
   }, [user]);
 
   useEffect(() => {
@@ -454,7 +494,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const loadProfile = async () => {
       if (!user) {
-        setCurrentUser(ME);
+        setCurrentUser((prev) => (areUsersEqual(prev, ME) ? prev : ME));
         return;
       }
 
@@ -480,7 +520,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle<ProfileRow>();
 
       if (data && !error) {
-        setCurrentUser(mapProfileToUser(data));
+        const nextUser = mapProfileToUser(data);
+        setCurrentUser((prev) => (areUsersEqual(prev, nextUser) ? prev : nextUser));
         return;
       }
 
@@ -497,7 +538,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .select("id, username, display_name, avatar_url, bio, home_location_name")
         .single<ProfileRow>();
 
-      setCurrentUser(
+      const nextUser =
         upserted
           ? mapProfileToUser(upserted)
           : {
@@ -506,8 +547,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               name: displayName,
               username,
               avatar: avatarUrl ?? makeAvatarUrl(user.id),
-            },
-      );
+            };
+      setCurrentUser((prev) => (areUsersEqual(prev, nextUser) ? prev : nextUser));
     };
 
     void loadProfile();
@@ -739,27 +780,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [currentUser]
   );
 
-  return (
-    <AppContext.Provider
-      value={{
-        currentUser,
-        posts,
-        comments,
-        parties,
-        refreshPosts,
-        addPost,
-        deletePost,
-        reportPost,
-        toggleLike,
-        addComment,
-        getCommentsForPost,
-        getPostById,
-        createParty,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+  const value = useMemo<AppContextType>(
+    () => ({
+      currentUser,
+      posts,
+      comments,
+      parties,
+      refreshPosts,
+      addPost,
+      deletePost,
+      reportPost,
+      toggleLike,
+      addComment,
+      getCommentsForPost,
+      getPostById,
+      createParty,
+    }),
+    [
+      currentUser,
+      posts,
+      comments,
+      parties,
+      refreshPosts,
+      addPost,
+      deletePost,
+      reportPost,
+      toggleLike,
+      addComment,
+      getCommentsForPost,
+      getPostById,
+      createParty,
+    ],
   );
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
 export function useApp() {

@@ -95,6 +95,15 @@ type LivePoi = {
   poiType?: string;
 };
 
+type MapParty = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  hostName: string;
+  members: { id: string; name: string; lat: number; lng: number }[];
+};
+
 type OverpassElement = {
   id: number;
   type: "node" | "way" | "relation";
@@ -136,6 +145,37 @@ function areLivePoisEqual(a: LivePoi[], b: LivePoi[]): boolean {
       Math.abs(x.lng - y.lng) > 0.000001
     ) {
       return false;
+    }
+  }
+  return true;
+}
+
+function areMapPartiesEqual(a: MapParty[], b: MapParty[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.name !== y.name ||
+      x.hostName !== y.hostName ||
+      Math.abs(x.lat - y.lat) > 0.000001 ||
+      Math.abs(x.lng - y.lng) > 0.000001 ||
+      x.members.length !== y.members.length
+    ) {
+      return false;
+    }
+    for (let j = 0; j < x.members.length; j += 1) {
+      const xm = x.members[j];
+      const ym = y.members[j];
+      if (
+        xm.id !== ym.id ||
+        xm.name !== ym.name ||
+        Math.abs(xm.lat - ym.lat) > 0.000001 ||
+        Math.abs(xm.lng - ym.lng) > 0.000001
+      ) {
+        return false;
+      }
     }
   }
   return true;
@@ -341,7 +381,7 @@ function buildMapHtml(
   lng: number,
   activeUsers: MapUser[],
   livePois: LivePoi[],
-  parties: { id: string; name: string; lat: number; lng: number; hostName: string; members: { id: string; name: string; lat: number; lng: number }[] }[],
+  parties: MapParty[],
   locationName: string,
   filterMode: MapFilterMode,
   presenceMode: MapPresenceMode,
@@ -1249,6 +1289,8 @@ function buildMapHtml(
     function addPartyAndMemberMarkers() {
       var partyData = ${partiesJson};
       var activePartyId = null;
+      var partyReturnView = null;
+      var partyAnimationToken = 0;
       var partyMemberMarkers = [];
 
       function updatePartyMemberVisibility() {
@@ -1275,11 +1317,51 @@ function buildMapHtml(
         partyEl.style.cursor = 'pointer';
         partyEl.className = 'party-pulse';
 
-        partyEl.addEventListener('click', function() {
+        function handlePartyClick(event) {
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+          }
+
+          var token = partyAnimationToken + 1;
+          partyAnimationToken = token;
+          try { map.stop(); } catch (_) {}
+
+          if (activePartyId === party.id && partyReturnView) {
+            var returnView = partyReturnView;
+            activePartyId = null;
+            partyReturnView = null;
+            updatePartyMemberVisibility();
+            map.easeTo({
+              center: returnView.center,
+              zoom: returnView.zoom,
+              pitch: returnView.pitch,
+              bearing: returnView.bearing,
+              duration: 700
+            });
+            return;
+          }
+
+          if (!partyReturnView) {
+            partyReturnView = {
+              center: map.getCenter(),
+              zoom: map.getZoom(),
+              pitch: map.getPitch(),
+              bearing: map.getBearing()
+            };
+          }
           activePartyId = party.id;
+          updatePartyMemberVisibility();
           map.easeTo({ center: [party.lng, party.lat], zoom: 17.5, duration: 700 });
-          setTimeout(updatePartyMemberVisibility, 720);
-        });
+          setTimeout(function() {
+            if (partyAnimationToken === token && activePartyId === party.id) {
+              updatePartyMemberVisibility();
+            }
+          }, 720);
+        }
+
+        partyEl.addEventListener('click', handlePartyClick);
 
         pushMarker(new maplibregl.Marker({ element: partyEl, anchor: 'center' })
           .setLngLat([party.lng, party.lat])
@@ -1473,6 +1555,9 @@ export default function MapScreen() {
   const [presenceMenuOpen, setPresenceMenuOpen] = useState(false);
   const [activeUsers, setActiveUsers] = useState<MapUser[]>([]);
   const [livePois, setLivePois] = useState<LivePoi[]>([]);
+  const [renderedUsers, setRenderedUsers] = useState<MapUser[]>([]);
+  const [renderedPois, setRenderedPois] = useState<LivePoi[]>([]);
+  const [renderedParties, setRenderedParties] = useState<MapParty[]>([]);
   const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
   const [isMapActive, setIsMapActive] = useState(false);
   const partyPanelAnim = useRef(new Animated.Value(0)).current;
@@ -1690,7 +1775,6 @@ out center tags ${LIVE_POI_LIMIT};`;
 
   useEffect(() => {
     if (!user || !homeLocation || !isMapActive) {
-      setActiveUsers([]);
       return;
     }
 
@@ -1705,7 +1789,6 @@ out center tags ${LIVE_POI_LIMIT};`;
 
   useEffect(() => {
     if (!user || !homeLocation || !isMapActive) {
-      setFriendIds(new Set());
       return;
     }
 
@@ -1719,7 +1802,7 @@ out center tags ${LIVE_POI_LIMIT};`;
 
   useEffect(() => {
     if (!homeLocation || !isMapActive || filterMode === "people") {
-      setLivePois([]);
+      if (filterMode === "people") setLivePois((prev) => (prev.length ? [] : prev));
       return;
     }
 
@@ -1788,6 +1871,16 @@ out center tags ${LIVE_POI_LIMIT};`;
 
   const visibleParties = useMemo(() => allParties, [allParties]);
 
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setRenderedUsers((prev) => (areMapUsersEqual(prev, visibleUsers) ? prev : visibleUsers));
+      setRenderedPois((prev) => (areLivePoisEqual(prev, livePois) ? prev : livePois));
+      setRenderedParties((prev) => (areMapPartiesEqual(prev, visibleParties) ? prev : visibleParties));
+    }, 450);
+
+    return () => clearTimeout(timeout);
+  }, [livePois, visibleParties, visibleUsers]);
+
   const selectedPartyMembers = useMemo(
     () => allUsers.filter((user) => selectedPartyMemberIds.includes(user.id)),
     [allUsers, selectedPartyMemberIds]
@@ -1806,15 +1899,15 @@ out center tags ${LIVE_POI_LIMIT};`;
     return buildMapHtml(
       homeLocation.lat,
       homeLocation.lng,
-      visibleUsers,
-      livePois,
-      visibleParties,
+      renderedUsers,
+      renderedPois,
+      renderedParties,
       currentLocationName ?? homeLocation.name,
       filterMode,
       presenceMode,
       __DEV__
     );
-  }, [homeLocation, visibleUsers, livePois, visibleParties, currentLocationName, filterMode, presenceMode]);
+  }, [homeLocation, renderedUsers, renderedPois, renderedParties, currentLocationName, filterMode, presenceMode]);
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {

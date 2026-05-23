@@ -1,25 +1,34 @@
-const primary = "#1A1A2E";
-const accent = "#FF6B6B";
-const accentBlue = "#4ECDC4";
+const primary = "#152238";
+const accent = "#FF4D8F";
+const accentBlue = "#21C7D9";
+const paper = "#F2FBFF";
+const ink = "#152238";
+const sunny = "#FFD84D";
 
 export default {
   light: {
-    text: "#1A1A2E",
-    textSecondary: "#6B7280",
-    textTertiary: "#9CA3AF",
-    background: "#FFFFFF",
-    backgroundSecondary: "#F7F8FA",
-    backgroundTertiary: "#EFF1F5",
+    text: ink,
+    textSecondary: "#42526D",
+    textTertiary: "#7890A8",
+    background: paper,
+    backgroundSecondary: "#FFFFFF",
+    backgroundTertiary: "#DFF4FF",
     tint: accent,
     tintBlue: accentBlue,
     primary,
-    separator: "#E5E7EB",
+    separator: "#152238",
     card: "#FFFFFF",
-    cardBorder: "#F0F1F3",
-    tabIconDefault: "#9CA3AF",
+    cardBorder: "#152238",
+    tabIconDefault: "#7890A8",
     tabIconSelected: accent,
-    like: "#FF6B6B",
-    commentIcon: "#4ECDC4",
-    placeholder: "#D1D5DB",
+    like: accent,
+    commentIcon: accentBlue,
+    placeholder: "#B8C7D8",
+    comicInk: ink,
+    comicPaper: paper,
+    comicPink: accent,
+    comicBlue: accentBlue,
+    comicYellow: sunny,
+    comicMint: "#22C55E",
   },
 };

@@ -1,4 +1,3 @@
-import { BlurView } from "expo-blur";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs, router } from "expo-router";
 import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
@@ -10,7 +9,6 @@ import {
   StyleSheet,
   View,
   TouchableOpacity,
-  useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -20,8 +18,8 @@ function NativeTabLayout() {
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "house", selected: "house.fill" }} />
-        <Label>Home</Label>
+        <Icon sf={{ default: "message", selected: "message.fill" }} />
+        <Label>Nachrichten</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="map">
         <Icon sf={{ default: "map", selected: "map.fill" }} />
@@ -54,9 +52,7 @@ function CreateTabButton({ onPress }: { onPress: () => void }) {
 }
 
 function ClassicTabLayout() {
-  const colorScheme = useColorScheme();
   const safeAreaInsets = useSafeAreaInsets();
-  const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
 
@@ -68,39 +64,35 @@ function ClassicTabLayout() {
         headerShown: false,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : Colors.light.background,
-          borderTopWidth: isWeb ? 1 : StyleSheet.hairlineWidth,
-          borderTopColor: Colors.light.separator,
+          backgroundColor: Colors.light.backgroundSecondary,
+          borderTopWidth: 3,
+          borderTopColor: Colors.light.comicInk,
           elevation: 0,
+          shadowColor: Colors.light.comicInk,
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: 0.16,
+          shadowRadius: 0,
           paddingBottom: safeAreaInsets.bottom,
           ...(isWeb ? { height: 84 } : {}),
         },
         tabBarBackground: () =>
-          isIOS ? (
-            <BlurView
-              intensity={100}
-              tint="light"
-              style={StyleSheet.absoluteFill}
-            />
-          ) : isWeb ? (
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: Colors.light.background },
-              ]}
-            />
-          ) : null,
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: Colors.light.backgroundSecondary },
+            ]}
+          />,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
+          title: "Nachrichten",
           tabBarIcon: ({ color }) =>
             isIOS ? (
-              <SymbolView name="house" tintColor={color} size={24} />
+              <SymbolView name="message" tintColor={color} size={24} />
             ) : (
-              <Feather name="home" size={22} color={color} />
+              <Feather name="message-circle" size={22} color={color} />
             ),
         }}
       />
@@ -163,9 +155,15 @@ const styles = StyleSheet.create({
   createTabInner: {
     width: 46,
     height: 32,
-    borderRadius: 10,
-    backgroundColor: Colors.light.primary,
+    borderRadius: 8,
+    backgroundColor: Colors.light.comicPink,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 2,
+    borderColor: Colors.light.comicInk,
+    shadowColor: Colors.light.comicInk,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 0,
   },
 });

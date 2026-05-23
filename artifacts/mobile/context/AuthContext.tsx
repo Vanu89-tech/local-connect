@@ -10,6 +10,8 @@ import React, {
 
 import { supabase } from "@/lib/supabase";
 
+const SESSION_CHECK_TIMEOUT_MS = 5000;
+
 type SignUpInput = {
   email: string;
   password: string;
@@ -34,12 +36,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      setLoading(false);
-    });
+    async function loadSession() {
+      try {
+        const { data } = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new Error("Supabase session check timed out"));
+            }, SESSION_CHECK_TIMEOUT_MS);
+          }),
+        ]);
+        if (!mounted) return;
+        setSession(data.session);
+      } catch (error) {
+        console.warn("Supabase session check failed", error);
+        if (!mounted) return;
+        setSession(null);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (!mounted) return;
+        setLoading(false);
+      }
+    }
+
+    loadSession();
 
     const {
       data: { subscription },
@@ -50,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
   }, []);
