@@ -23,7 +23,6 @@ import { Party, PartyMember, useApp } from "@/context/AppContext";
 import { useAuth } from "@/context/AuthContext";
 import { useLocation } from "@/context/LocationContext";
 import { useProximity } from "@/context/ProximityContext";
-import { RadarOverlay } from "@/components/RadarOverlay";
 import { supabase } from "@/lib/supabase";
 import type { WebView as WebViewType } from "react-native-webview";
 
@@ -1521,6 +1520,8 @@ function buildMapHtml(
         );
       }
 
+      meEl.className = 'pulse';
+
       var meMarker = pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
         .setLngLat([${lng}, ${lat}])
         .setPopup(new maplibregl.Popup({ closeButton: false, offset: 11 }).setHTML(
@@ -1567,8 +1568,67 @@ export default function MapScreen() {
   const { nearbyUsers: radarUsers, radarSettings, myLiveLocation } = useProximity();
   const insets = useSafeAreaInsets();
 
-  const [showRadarOverlay, setShowRadarOverlay] = useState(true);
   const webViewRef = useRef<WebViewType>(null);
+
+  const injectRadar = useCallback(() => {
+    if (!webViewRef.current) return;
+    const radarLat = myLiveLocation?.lat ?? homeLocation?.lat;
+    const radarLon = myLiveLocation?.lon ?? homeLocation?.lng;
+
+    if (!radarSettings.enabled || radarLat == null || radarLon == null) {
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          if (!window.map) return;
+          if (window.map.getLayer('radar-fill')) window.map.removeLayer('radar-fill');
+          if (window.map.getLayer('radar-line')) window.map.removeLayer('radar-line');
+          if (window.map.getSource('radar-radius')) window.map.removeSource('radar-radius');
+        })(); true;
+      `);
+      return;
+    }
+
+    webViewRef.current.injectJavaScript(`
+      (function() {
+        if (!window.map) return;
+        function drawRadar() {
+          var lat = ${radarLat};
+          var lon = ${radarLon};
+          var radiusM = ${radarSettings.radiusM};
+          if (window.map.getLayer('radar-fill')) window.map.removeLayer('radar-fill');
+          if (window.map.getLayer('radar-line')) window.map.removeLayer('radar-line');
+          if (window.map.getSource('radar-radius')) window.map.removeSource('radar-radius');
+          var pts = 64;
+          var coords = [];
+          for (var i = 0; i <= pts; i++) {
+            var angle = (i / pts) * 2 * Math.PI;
+            var dLat = (radiusM / 111320) * Math.cos(angle);
+            var dLon = (radiusM / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+            coords.push([lon + dLon, lat + dLat]);
+          }
+          window.map.addSource('radar-radius', {
+            type: 'geojson',
+            data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] } }
+          });
+          window.map.addLayer({ id: 'radar-fill', type: 'fill', source: 'radar-radius',
+            paint: { 'fill-color': '${Colors.light.tint}', 'fill-opacity': 0.06 }
+          });
+          window.map.addLayer({ id: 'radar-line', type: 'line', source: 'radar-radius',
+            paint: { 'line-color': '${Colors.light.tint}', 'line-opacity': 0.45, 'line-width': 1.5, 'line-dasharray': [6, 4] }
+          });
+        }
+        if (window.map.isStyleLoaded()) {
+          drawRadar();
+        } else {
+          window.map.once('style.load', drawRadar);
+        }
+      })(); true;
+    `);
+  }, [homeLocation, myLiveLocation, radarSettings.enabled, radarSettings.radiusM]);
+
+  useEffect(() => {
+    injectRadar();
+  }, [injectRadar]);
+
   const [showPartyComposer, setShowPartyComposer] = useState(false);
   const [partyName, setPartyName] = useState("");
   const [selectedPartyMemberIds, setSelectedPartyMemberIds] = useState<string[]>([]);
@@ -2194,36 +2254,8 @@ out center tags ${LIVE_POI_LIMIT};`;
           req.url.startsWith("https://") ||
           req.url.startsWith("http://")
         }
-        onLoad={() => {
-          // Radar-Radius-Kreis in Leaflet injizieren
-          const radarLat = myLiveLocation?.lat ?? homeLocation?.lat;
-          const radarLon = myLiveLocation?.lon ?? homeLocation?.lng;
-          if (radarLat == null || radarLon == null || !radarSettings.enabled) return;
-          webViewRef.current?.injectJavaScript(`
-            (function() {
-              if (!window.map) return;
-              if (window._radarCircle) window._radarCircle.remove();
-              window._radarCircle = L.circle([${radarLat}, ${radarLon}], {
-                radius: ${radarSettings.radiusM},
-                color: '${Colors.light.tint}',
-                fillColor: '${Colors.light.tint}',
-                fillOpacity: 0.05,
-                opacity: 0.35,
-                weight: 1.5,
-                dashArray: '6 4',
-              }).addTo(window.map);
-            })();
-            true;
-          `);
-        }}
+        onLoad={injectRadar}
       />
-
-      {/* Radar-Overlay: Pulsierender Ring zentriert auf der Karte */}
-      {showRadarOverlay && radarSettings.enabled && (
-        <View style={styles.radarOverlayWrap} pointerEvents="none">
-          <RadarOverlay size={240} color={Colors.light.tint} />
-        </View>
-      )}
 
       <Animated.View
         style={[

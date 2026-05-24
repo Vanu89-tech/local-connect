@@ -21,6 +21,29 @@ Der User möchte iterativ im Simulator testen und Features direkt weiterentwicke
 Style-System ist vollständig aufgeräumt. Alle `comic*`-Aliase wurden durch neutrale Tokens ersetzt.
 Alle Screens wurden geprüft und bereinigt. TypeScript-Check sauber.
 
+## Zuletzt erledigt (2026-05-24) — Session 3
+
+### Proximity Radar – Radar-Overlay Fix (map.tsx)
+- React Native `RadarOverlay`-Overlay entfernt (war statisch in der Bildschirmmitte, nicht auf der Karte)
+- `onLoad`-Injection korrigiert: war Leaflet `L.circle()` (falsches Framework!) → jetzt MapLibre GL GeoJSON-Polygon
+- Eigene `injectRadar` useCallback-Funktion + useEffect → Kreis aktualisiert sich wenn Radius/Position ändert
+- MapLibre-Kreis: gestrichelte Linie + transparente Füllung, exakt um User-Koordinaten
+- Ich-Marker (roter Punkt auf der Karte) pulsiert jetzt → `meEl.className = 'pulse'`
+- Commit: fix: replace expo-notifications + metro config fixes (4b6c6c8)
+Betroffene Dateien:
+- `artifacts/mobile/app/(tabs)/map.tsx`
+
+### Proximity Radar System – Phase 1–6 (vorherige Session)
+- SQL-Migrations: `supabase/migrations/001_proximity.sql` + `002_proximity_realtime.sql`
+- `lib/geohash.ts` — Pure-TS Geohash (encode/decode/neighbors)
+- `lib/proximity.ts` — upsertMyLocation, fetchNearbyEntities, removeMyLocation
+- `lib/notifications.ts` — Alert.alert Fallback (expo-notifications erfordert Config Plugin)
+- `context/ProximityContext.tsx` — GPS-Watching, Supabase Realtime (9 Kanäle), Cooldowns
+- `components/RadarOverlay.tsx` — Animierte SVG-Pulse-Ringe (4 Ringe, Animated.loop)
+- `app/radar-settings.tsx` — Radius-Chips, Sichtbarkeit, Intent
+- `app/_layout.tsx` — ProximityProvider hinzugefügt
+- `metro.config.js` — unstable_enableSymlinks, pnpm-Store in watchFolders
+
 ## Zuletzt erledigt (2026-05-24) — Session 2
 
 ### Messenger-Tab Fixes (index.tsx)
