@@ -20,6 +20,7 @@ import Colors from "@/constants/colors";
 import { AppProvider } from "@/context/AppContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { LocationProvider, useLocation } from "@/context/LocationContext";
+import { ProximityProvider } from "@/context/ProximityContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -150,6 +151,10 @@ function RootLayoutNav() {
         name="presence-choice"
         options={{ headerShown: false, presentation: "fullScreenModal" }}
       />
+      <Stack.Screen
+        name="radar-settings"
+        options={{ presentation: "modal", headerShown: false }}
+      />
     </Stack>
   );
 }
@@ -186,11 +191,13 @@ export default function RootLayout() {
           <AuthProvider>
             <LocationProvider>
               <AppProvider>
-                <GestureHandlerRootView style={{ flex: 1 }}>
-                  <KeyboardProvider>
-                    <RootLayoutNav />
-                  </KeyboardProvider>
-                </GestureHandlerRootView>
+                <ProximityProvider>
+                  <GestureHandlerRootView style={{ flex: 1 }}>
+                    <KeyboardProvider>
+                      <RootLayoutNav />
+                    </KeyboardProvider>
+                  </GestureHandlerRootView>
+                </ProximityProvider>
               </AppProvider>
             </LocationProvider>
           </AuthProvider>

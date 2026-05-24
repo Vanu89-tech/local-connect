@@ -22,7 +22,10 @@ import Colors from "@/constants/colors";
 import { Party, PartyMember, useApp } from "@/context/AppContext";
 import { useAuth } from "@/context/AuthContext";
 import { useLocation } from "@/context/LocationContext";
+import { useProximity } from "@/context/ProximityContext";
+import { RadarOverlay } from "@/components/RadarOverlay";
 import { supabase } from "@/lib/supabase";
+import type { WebView as WebViewType } from "react-native-webview";
 
 const MAP_RADIUS_DEGREES = 0.06; // roughly 6-7km
 const MAP_QUERY_LIMIT = 250;
@@ -1561,8 +1564,11 @@ export default function MapScreen() {
   const { user } = useAuth();
   const { homeLocation, currentLocationName, effectivePresenceMode } = useLocation();
   const { posts, parties: storedParties, createParty, currentUser } = useApp();
+  const { nearbyUsers: radarUsers, radarSettings, myLiveLocation } = useProximity();
   const insets = useSafeAreaInsets();
 
+  const [showRadarOverlay, setShowRadarOverlay] = useState(true);
+  const webViewRef = useRef<WebViewType>(null);
   const [showPartyComposer, setShowPartyComposer] = useState(false);
   const [partyName, setPartyName] = useState("");
   const [selectedPartyMemberIds, setSelectedPartyMemberIds] = useState<string[]>([]);
@@ -2007,8 +2013,20 @@ out center tags ${LIVE_POI_LIMIT};`;
         <View style={styles.headerRight}>
           <View style={styles.badge}>
             <View style={styles.badgeDot} />
-            <Text style={styles.badgeText}>{visibleUsers.length} aktiv</Text>
+            <Text style={styles.badgeText}>{visibleUsers.length + radarUsers.length} aktiv</Text>
           </View>
+          {/* Radar-Button */}
+          <Pressable
+            style={[styles.radarBtn, radarSettings.enabled && styles.radarBtnActive]}
+            onPress={() => router.push("/radar-settings")}
+            hitSlop={8}
+          >
+            <Feather
+              name="radio"
+              size={15}
+              color={radarSettings.enabled ? Colors.light.onBright : Colors.light.text}
+            />
+          </Pressable>
         </View>
       </View>
 
@@ -2156,6 +2174,7 @@ out center tags ${LIVE_POI_LIMIT};`;
 
       {/* Map */}
       <WebView
+        ref={webViewRef}
         style={styles.map}
         source={{ html }}
         scrollEnabled={false}
@@ -2175,7 +2194,36 @@ out center tags ${LIVE_POI_LIMIT};`;
           req.url.startsWith("https://") ||
           req.url.startsWith("http://")
         }
+        onLoad={() => {
+          // Radar-Radius-Kreis in Leaflet injizieren
+          const radarLat = myLiveLocation?.lat ?? homeLocation?.lat;
+          const radarLon = myLiveLocation?.lon ?? homeLocation?.lng;
+          if (radarLat == null || radarLon == null || !radarSettings.enabled) return;
+          webViewRef.current?.injectJavaScript(`
+            (function() {
+              if (!window.map) return;
+              if (window._radarCircle) window._radarCircle.remove();
+              window._radarCircle = L.circle([${radarLat}, ${radarLon}], {
+                radius: ${radarSettings.radiusM},
+                color: '${Colors.light.tint}',
+                fillColor: '${Colors.light.tint}',
+                fillOpacity: 0.05,
+                opacity: 0.35,
+                weight: 1.5,
+                dashArray: '6 4',
+              }).addTo(window.map);
+            })();
+            true;
+          `);
+        }}
       />
+
+      {/* Radar-Overlay: Pulsierender Ring zentriert auf der Karte */}
+      {showRadarOverlay && radarSettings.enabled && (
+        <View style={styles.radarOverlayWrap} pointerEvents="none">
+          <RadarOverlay size={240} color={Colors.light.tint} />
+        </View>
+      )}
 
       <Animated.View
         style={[
@@ -2358,6 +2406,25 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 12, fontWeight: "600", color: activeBadgeColor },
 
   map: { flex: 1 },
+
+  radarBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.separator,
+  },
+  radarBtnActive: {
+    backgroundColor: Colors.light.tint,
+    borderColor: Colors.light.tint,
+  },
+  radarOverlayWrap: {
+    position: "absolute",
+    top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 5,
+  },
 
   presenceMenuWrap: {
     position: "absolute",
