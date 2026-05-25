@@ -78,3 +78,20 @@ pnpm exec expo start --dev-client --host localhost
 - Nach relevanten Code-Aenderungen TypeScript pruefen.
 - Nach UI-Aenderungen Simulator/visuelle Kontrolle bevorzugen.
 - Memory aktualisieren, wenn ein neues grosses Feature oder ein wichtiger Architekturentscheid dazukommt.
+
+<!-- APP_SYNC_STATUS_START -->
+## Letzter Sync
+
+- Timestamp UTC: 20260525T111619Z
+- Projekt: Local-Connect
+- Branch: master
+- Commit vor Sync: 86f684d
+- Lokale Änderungen vor Memory-Update: 0
+- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260525T111619Z
+- Hinweis: Dieser Block wird automatisch von /sync aktualisiert.
+
+### Geänderte Dateien vor Sync
+
+- keine lokalen Änderungen vor dem Sync
+<!-- APP_SYNC_STATUS_END -->
+
