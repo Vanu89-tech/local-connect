@@ -106,15 +106,13 @@ export default function PresenceChoiceScreen() {
   );
 }
 
-const isNeonStyle = Colors.activeStyle.id === "neon";
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.light.background,
     paddingHorizontal: 22,
     justifyContent: "center",
-    gap: 28,
+    gap: 32,
   },
   copy: {
     alignItems: "center",
@@ -128,13 +126,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   title: {
-    fontSize: 50,
+    fontSize: 48,
     fontFamily: "Inter_700Bold",
     color: Colors.light.primary,
     letterSpacing: 0,
-    textShadowColor: Colors.typography.displayShadowColor,
-    textShadowOffset: Colors.typography.displayShadowOffset,
-    textShadowRadius: Colors.typography.displayShadowRadius,
+    textShadowColor: "transparent",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 0,
   },
   subtitle: {
     maxWidth: 300,
@@ -147,20 +145,21 @@ const styles = StyleSheet.create({
   },
   choices: {
     alignItems: "center",
-    gap: 22,
+    gap: 16,
   },
   modeButton: {
-    width: 218,
-    height: 218,
-    borderRadius: isNeonStyle ? Colors.shape.radiusLg : 109,
+    width: "100%",
+    maxWidth: 330,
+    height: 148,
+    borderRadius: Colors.shape.radiusLg,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    borderWidth: Colors.shape.borderWidth + 1,
-    borderColor: Colors.light.text,
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.light.separator + "88",
     shadowColor: Colors.shadow.color,
-    shadowOffset: { width: 0, height: Colors.shadow.offsetY + 4 },
-    shadowOpacity: Colors.shadow.opacity + 0.06,
+    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
+    shadowOpacity: Colors.shadow.opacity,
     shadowRadius: Colors.shadow.radius,
   },
   onlineButton: {
@@ -170,20 +169,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.yellow,
   },
   iconBadge: {
-    width: 92,
-    height: 92,
-    borderRadius: isNeonStyle ? Colors.shape.radiusLg : 46,
+    width: 54,
+    height: 54,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(21,34,56,0.18)",
-    borderWidth: Colors.shape.borderWidth,
-    borderColor: Colors.light.text,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.38)",
   },
   homeIconBadge: {
     backgroundColor: "#FFFFFF",
   },
   modeTitle: {
-    fontSize: 34,
+    fontSize: 30,
     fontFamily: "Inter_700Bold",
     color: "#FFFFFF",
     letterSpacing: 0,

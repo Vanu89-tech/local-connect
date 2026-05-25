@@ -50,6 +50,35 @@ cd artifacts/mobile
 npx expo run:ios
 ```
 
+## Naechster wichtiger Schritt
+
+Native iOS-App neu bauen/installieren, damit das neue App-Icon sichtbar wird.
+
+Grund:
+- `artifacts/mobile/assets/images/icon.png` wurde ersetzt.
+- `artifacts/mobile/assets/images/splash-icon.png` wurde ersetzt.
+- iOS Homescreen/Splash-Icon aktualisieren sich nicht per Metro/Fast Refresh.
+
+Empfohlener Befehl:
+
+```bash
+cd /Users/razvan/Desktop/Local-Connect/artifacts/mobile
+pnpm exec expo run:ios
+```
+
+Danach pruefen:
+- neues Locals-App-Icon auf dem iPhone Simulator
+- Splash-Icon aktualisiert
+- App startet weiter mit Supabase-Verbindung
+
+## Aktueller Stand 2026-05-25
+
+- UI-Chrome wurde Apple-like/minimaler modernisiert, Neon-Palette bleibt.
+- Kartendarstellung/Gebaeude/POI-Symbole sollten nicht veraendert werden.
+- Gruppen- und Partymechanik ist app-weit im `AppContext` verdrahtet.
+- Supabase-Migration fuer `groups`, `group_members`, `chat_messages` wurde erstellt und vom User ausgefuehrt.
+- Neues App-Icon basiert auf zwei Sprechblasen mit Kartengrid, Variante 3 aus den Vorschlaegen.
+
 ## User-Präferenzen
 
 - Kommunikation auf Deutsch

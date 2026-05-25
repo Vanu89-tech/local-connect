@@ -101,6 +101,22 @@ export type Party = {
   createdAt: string;
 };
 
+export type GroupMember = {
+  id: string;
+  name: string;
+  avatar: string;
+  activity: string;
+};
+
+export type Group = {
+  id: string;
+  name: string;
+  ownerId: string;
+  ownerName: string;
+  members: GroupMember[];
+  createdAt: string;
+};
+
 const SEED_USERS: User[] = [
   {
     id: "u1",
@@ -286,6 +302,7 @@ type AppContextType = {
   posts: Post[];
   comments: Comment[];
   parties: Party[];
+  groups: Group[];
   mapFriends: MapFriend[];
   setMapFriends: (friends: MapFriend[]) => void;
   localMessages: Record<string, ChatMessage[]>;
@@ -304,7 +321,10 @@ type AppContextType = {
   getCommentsForPost: (postId: string) => Comment[];
   getPostById: (postId: string) => Post | undefined;
   updateProfileLocation: (locationName: string) => Promise<void>;
-  createParty: (name: string, lat: number, lng: number, members: PartyMember[]) => void;
+  createGroup: (name: string, members: GroupMember[]) => string;
+  deleteGroup: (id: string) => void;
+  updateGroupMembers: (id: string, members: GroupMember[]) => void;
+  createParty: (name: string, lat: number, lng: number, members: PartyMember[]) => string;
   deleteParty: (id: string) => void;
   updatePartyMembers: (id: string, members: PartyMember[]) => void;
 };
@@ -335,6 +355,48 @@ type PostRow = {
   created_at: string;
 };
 
+type GroupRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  created_at: string;
+};
+
+type GroupMemberRow = {
+  group_id: string;
+  profile_id: string;
+  activity: string | null;
+  profiles?: ProfileRow | ProfileRow[] | null;
+};
+
+type PartyRow = {
+  id: string;
+  host_id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  created_at: string;
+  profiles?: ProfileRow | ProfileRow[] | null;
+};
+
+type PartyMemberRow = {
+  party_id: string;
+  profile_id: string;
+  lat: number;
+  lng: number;
+  profiles?: ProfileRow | ProfileRow[] | null;
+};
+
+type ChatMessageRow = {
+  id: string;
+  thread_type: "group" | "party";
+  thread_id: string;
+  sender_id: string;
+  text: string;
+  image_url: string | null;
+  created_at: string;
+};
+
 type SupabaseErrorLike = {
   code?: string;
   message?: string;
@@ -353,6 +415,23 @@ function isMissingModerationColumns(error: unknown): boolean {
 
 function makeAvatarUrl(seed: string): string {
   return `https://api.dicebear.com/9.x/thumbs/png?seed=${encodeURIComponent(seed)}`;
+}
+
+function makeLocalUuid(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function firstProfile(profile: ProfileRow | ProfileRow[] | null | undefined): ProfileRow | null {
+  if (!profile) return null;
+  return Array.isArray(profile) ? profile[0] ?? null : profile;
 }
 
 function mapProfileToUser(profile: ProfileRow): User {
@@ -413,16 +492,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [posts, setPosts] = useState<Post[]>(SEED_POSTS);
   const [comments, setComments] = useState<Comment[]>(SEED_COMMENTS);
   const [parties, setParties] = useState<Party[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [currentUser, setCurrentUser] = useState<User>(ME);
   const [mapFriends, setMapFriends] = useState<MapFriend[]>([]);
   const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
+  const [hydrated, setHydrated] = useState(false);
 
   const addLocalMessage = useCallback((threadId: string, msg: ChatMessage) => {
     setLocalMessages((prev) => ({
       ...prev,
       [threadId]: [...(prev[threadId] ?? []), msg],
     }));
-  }, []);
+    if (!user) return;
+    const [threadType, rawThreadId] = threadId.split(":");
+    if ((threadType !== "group" && threadType !== "party") || !isUuid(rawThreadId)) return;
+    void supabase.from("chat_messages").insert({
+      id: isUuid(msg.id) ? msg.id : makeLocalUuid(),
+      thread_type: threadType,
+      thread_id: rawThreadId,
+      sender_id: user.id,
+      text: msg.text,
+      image_url: msg.imageUri ?? null,
+    });
+  }, [user]);
 
   useEffect(() => {
     loadData();
@@ -522,6 +614,157 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void refreshPosts();
   }, [refreshPosts, user]);
 
+  const refreshSocialThreads = useCallback(async () => {
+    if (!user) return;
+
+    const { data: ownedGroups } = await supabase
+      .from("groups")
+      .select("id, owner_id, name, created_at")
+      .eq("owner_id", user.id)
+      .returns<GroupRow[]>();
+
+    const { data: memberGroupRows } = await supabase
+      .from("group_members")
+      .select("group_id")
+      .eq("profile_id", user.id)
+      .returns<{ group_id: string }[]>();
+
+    const memberGroupIds = Array.from(new Set((memberGroupRows ?? []).map((row) => row.group_id)));
+    const { data: joinedGroups } = memberGroupIds.length
+      ? await supabase
+          .from("groups")
+          .select("id, owner_id, name, created_at")
+          .in("id", memberGroupIds)
+          .returns<GroupRow[]>()
+      : { data: [] as GroupRow[] };
+
+    const groupRows = Array.from(
+      new Map([...(ownedGroups ?? []), ...(joinedGroups ?? [])].map((group) => [group.id, group])).values(),
+    );
+    const groupIds = groupRows.map((group) => group.id);
+    const ownerIds = Array.from(new Set(groupRows.map((group) => group.owner_id)));
+
+    const { data: groupMemberRows } = groupIds.length
+      ? await supabase
+          .from("group_members")
+          .select("group_id, profile_id, activity, profiles(id, username, display_name, avatar_url, bio, home_location_name)")
+          .in("group_id", groupIds)
+          .returns<GroupMemberRow[]>()
+      : { data: [] as GroupMemberRow[] };
+
+    const { data: ownerProfiles } = ownerIds.length
+      ? await supabase
+          .from("profiles")
+          .select("id, username, display_name, avatar_url, bio, home_location_name")
+          .in("id", ownerIds)
+          .returns<ProfileRow[]>()
+      : { data: [] as ProfileRow[] };
+    const ownerById = new Map((ownerProfiles ?? []).map((profile) => [profile.id, mapProfileToUser(profile)]));
+
+    setGroups(
+      groupRows.map((group) => ({
+        id: group.id,
+        name: group.name,
+        ownerId: group.owner_id,
+        ownerName: ownerById.get(group.owner_id)?.name ?? "Local",
+        createdAt: group.created_at,
+        members: (groupMemberRows ?? [])
+          .filter((member) => member.group_id === group.id)
+          .map((member) => {
+            const profile = firstProfile(member.profiles);
+            return {
+              id: member.profile_id,
+              name: profile?.display_name ?? "Local",
+              avatar: profile?.avatar_url ?? makeAvatarUrl(member.profile_id),
+              activity: member.activity ?? "Gerade online unterwegs",
+            };
+          }),
+      })),
+    );
+
+    const { data: partyRows } = await supabase
+      .from("parties")
+      .select("id, host_id, name, lat, lng, created_at, profiles(id, username, display_name, avatar_url, bio, home_location_name)")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .returns<PartyRow[]>();
+
+    const partyIds = (partyRows ?? []).map((party) => party.id);
+    const { data: partyMemberRows } = partyIds.length
+      ? await supabase
+          .from("party_members")
+          .select("party_id, profile_id, lat, lng, profiles(id, username, display_name, avatar_url, bio, home_location_name)")
+          .in("party_id", partyIds)
+          .returns<PartyMemberRow[]>()
+      : { data: [] as PartyMemberRow[] };
+
+    setParties(
+      (partyRows ?? []).map((party) => {
+        const host = firstProfile(party.profiles);
+        return {
+          id: party.id,
+          name: party.name,
+          lat: party.lat,
+          lng: party.lng,
+          hostId: party.host_id,
+          hostName: host?.display_name ?? "Local",
+          createdAt: party.created_at,
+          members: (partyMemberRows ?? [])
+            .filter((member) => member.party_id === party.id)
+            .map((member) => {
+              const profile = firstProfile(member.profiles);
+              return {
+                id: member.profile_id,
+                name: profile?.display_name ?? "Local",
+                lat: member.lat,
+                lng: member.lng,
+              };
+            }),
+        };
+      }),
+    );
+
+    const threadFilters = [
+      ...groupIds.map((id) => `and(thread_type.eq.group,thread_id.eq.${id})`),
+      ...partyIds.map((id) => `and(thread_type.eq.party,thread_id.eq.${id})`),
+    ];
+    if (threadFilters.length) {
+      const { data: messageRows } = await supabase
+        .from("chat_messages")
+        .select("id, thread_type, thread_id, sender_id, text, image_url, created_at")
+        .or(threadFilters.join(","))
+        .order("created_at", { ascending: true })
+        .returns<ChatMessageRow[]>();
+
+      const nextMessages: Record<string, ChatMessage[]> = {};
+      (messageRows ?? []).forEach((message) => {
+        const key = `${message.thread_type}:${message.thread_id}`;
+        const created = new Date(message.created_at);
+        const time = `${created.getHours().toString().padStart(2, "0")}:${created.getMinutes().toString().padStart(2, "0")}`;
+        nextMessages[key] = [
+          ...(nextMessages[key] ?? []),
+          {
+            id: message.id,
+            senderId: message.sender_id,
+            text: message.text,
+            time,
+            imageUri: message.image_url ?? undefined,
+          },
+        ];
+      });
+      setLocalMessages((prev) => ({ ...prev, ...nextMessages }));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    void refreshSocialThreads();
+    const interval = setInterval(() => {
+      void refreshSocialThreads();
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [refreshSocialThreads, user]);
+
   useEffect(() => {
     const loadProfile = async () => {
       if (!user) {
@@ -592,8 +835,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(saved);
         if (parsed.posts?.length > 0) setPosts(parsed.posts);
         if (parsed.comments?.length > 0) setComments(parsed.comments);
+        if (Array.isArray(parsed.parties)) setParties(parsed.parties);
+        if (Array.isArray(parsed.groups)) setGroups(parsed.groups);
+        if (parsed.localMessages && typeof parsed.localMessages === "object") {
+          setLocalMessages(parsed.localMessages);
+        }
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      setHydrated(true);
+    }
   };
 
   const saveData = useCallback(
@@ -601,12 +852,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         await AsyncStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify({ posts: newPosts, comments: newComments })
+          JSON.stringify({
+            posts: newPosts,
+            comments: newComments,
+            parties,
+            groups,
+            localMessages,
+          })
         );
       } catch (_) {}
     },
-    []
+    [groups, localMessages, parties]
   );
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ posts, comments, parties, groups, localMessages }),
+    );
+  }, [comments, groups, hydrated, localMessages, parties, posts]);
 
   const addPost = useCallback(
     async (
@@ -794,10 +1059,89 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [posts]
   );
 
+  const createGroup = useCallback(
+    (name: string, members: GroupMember[]) => {
+      const groupId = makeLocalUuid();
+      const newGroup: Group = {
+        id: groupId,
+        name,
+        ownerId: currentUser.id,
+        ownerName: currentUser.name,
+        members,
+        createdAt: new Date().toISOString(),
+      };
+      setGroups((prev) => [newGroup, ...prev]);
+      if (user) {
+        void (async () => {
+          const { error } = await supabase.from("groups").insert({
+            id: groupId,
+            owner_id: user.id,
+            name,
+          });
+          if (error) {
+            console.warn("group insert failed", error.message);
+            return;
+          }
+          const memberRows = members
+            .filter((member) => isUuid(member.id))
+            .map((member) => ({
+              group_id: groupId,
+              profile_id: member.id,
+              activity: member.activity,
+              invited_by: user.id,
+            }));
+          if (memberRows.length) {
+            const { error: memberError } = await supabase.from("group_members").upsert(memberRows);
+            if (memberError) console.warn("group members insert failed", memberError.message);
+          }
+        })();
+      }
+      return groupId;
+    },
+    [currentUser.id, currentUser.name, user],
+  );
+
+  const deleteGroup = useCallback((id: string) => {
+    setGroups((prev) => prev.filter((group) => group.id !== id));
+    setLocalMessages((prev) => {
+      const next = { ...prev };
+      delete next[`group:${id}`];
+      return next;
+    });
+    if (user && isUuid(id)) {
+      void supabase.from("groups").delete().eq("id", id).eq("owner_id", user.id);
+    }
+  }, [user]);
+
+  const updateGroupMembers = useCallback((id: string, members: GroupMember[]) => {
+    setGroups((prev) => prev.map((group) => (group.id === id ? { ...group, members } : group)));
+    if (!user || !isUuid(id)) return;
+    void (async () => {
+      const { error: deleteError } = await supabase.from("group_members").delete().eq("group_id", id);
+      if (deleteError) {
+        console.warn("group members delete failed", deleteError.message);
+        return;
+      }
+      const memberRows = members
+        .filter((member) => isUuid(member.id))
+        .map((member) => ({
+          group_id: id,
+          profile_id: member.id,
+          activity: member.activity,
+          invited_by: user.id,
+        }));
+      if (memberRows.length) {
+        const { error } = await supabase.from("group_members").upsert(memberRows);
+        if (error) console.warn("group members update failed", error.message);
+      }
+    })();
+  }, [user]);
+
   const createParty = useCallback(
     (name: string, lat: number, lng: number, members: PartyMember[]) => {
+      const partyId = makeLocalUuid();
       const newParty: Party = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 6),
+        id: partyId,
         name,
         lat,
         lng,
@@ -807,17 +1151,76 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         createdAt: new Date().toISOString(),
       };
       setParties((prev) => [...prev, newParty]);
+      if (user) {
+        void (async () => {
+          const { error } = await supabase.from("parties").insert({
+            id: partyId,
+            host_id: user.id,
+            name,
+            lat,
+            lng,
+            is_active: true,
+          });
+          if (error) {
+            console.warn("party insert failed", error.message);
+            return;
+          }
+          const memberRows = members
+            .filter((member) => isUuid(member.id))
+            .map((member) => ({
+              party_id: partyId,
+              profile_id: member.id,
+              lat: member.lat,
+              lng: member.lng,
+              invited_by: user.id,
+            }));
+          if (memberRows.length) {
+            const { error: memberError } = await supabase.from("party_members").upsert(memberRows);
+            if (memberError) console.warn("party members insert failed", memberError.message);
+          }
+        })();
+      }
+      return partyId;
     },
-    [currentUser]
+    [currentUser, user]
   );
 
   const deleteParty = useCallback((id: string) => {
     setParties((prev) => prev.filter((p) => p.id !== id));
-  }, []);
+    setLocalMessages((prev) => {
+      const next = { ...prev };
+      delete next[`party:${id}`];
+      return next;
+    });
+    if (user && isUuid(id)) {
+      void supabase.from("parties").delete().eq("id", id).eq("host_id", user.id);
+    }
+  }, [user]);
 
   const updatePartyMembers = useCallback((id: string, members: PartyMember[]) => {
     setParties((prev) => prev.map((p) => (p.id === id ? { ...p, members } : p)));
-  }, []);
+    if (!user || !isUuid(id)) return;
+    void (async () => {
+      const { error: deleteError } = await supabase.from("party_members").delete().eq("party_id", id);
+      if (deleteError) {
+        console.warn("party members delete failed", deleteError.message);
+        return;
+      }
+      const memberRows = members
+        .filter((member) => isUuid(member.id))
+        .map((member) => ({
+          party_id: id,
+          profile_id: member.id,
+          lat: member.lat,
+          lng: member.lng,
+          invited_by: user.id,
+        }));
+      if (memberRows.length) {
+        const { error } = await supabase.from("party_members").upsert(memberRows);
+        if (error) console.warn("party members update failed", error.message);
+      }
+    })();
+  }, [user]);
 
   const updateProfileLocation = useCallback(
     async (locationName: string) => {
@@ -845,6 +1248,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       posts,
       comments,
       parties,
+      groups,
       mapFriends,
       setMapFriends,
       localMessages,
@@ -858,6 +1262,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getCommentsForPost,
       getPostById,
       updateProfileLocation,
+      createGroup,
+      deleteGroup,
+      updateGroupMembers,
       createParty,
       deleteParty,
       updatePartyMembers,
@@ -867,6 +1274,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       posts,
       comments,
       parties,
+      groups,
       mapFriends,
       setMapFriends,
       localMessages,
@@ -880,6 +1288,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getCommentsForPost,
       getPostById,
       updateProfileLocation,
+      createGroup,
+      deleteGroup,
+      updateGroupMembers,
       createParty,
       deleteParty,
       updatePartyMembers,

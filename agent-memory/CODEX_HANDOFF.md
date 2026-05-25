@@ -1,6 +1,6 @@
 # Codex Handoff
 
-Stand: 2026-05-24
+Stand: 2026-05-25
 
 ## Wichtigster Kontext
 
@@ -18,8 +18,32 @@ Der User möchte iterativ im Simulator testen und Features direkt weiterentwicke
 
 ## Aktueller Fokus
 
-Style-System ist vollständig aufgeräumt. Alle `comic*`-Aliase wurden durch neutrale Tokens ersetzt.
-Alle Screens wurden geprüft und bereinigt. TypeScript-Check sauber.
+Aktueller unmittelbarer naechster Schritt: nativer iOS-Rebuild, damit das neu implementierte App-Icon auf dem Simulator/Home-Screen sichtbar wird.
+
+```bash
+cd /Users/razvan/Desktop/Local-Connect/artifacts/mobile
+pnpm exec expo run:ios
+```
+
+Grund: `artifacts/mobile/assets/images/icon.png` und `splash-icon.png` wurden ersetzt. Metro/Fast Refresh reicht fuer App-Icon-Aenderungen nicht.
+
+## Zuletzt erledigt (2026-05-25) — aktuelle Session
+
+### Modernes App-Design + Gruppen/Parties + Supabase
+- UI-Chrome modernisiert: Apple-like/minimaler, gleiche Neon-Palette beibehalten.
+- Kartendarstellung, Gebaeude, POIs und Map-Symbole bewusst nicht veraendert.
+- Gruppen-/Partymechanik app-weit in `AppContext` verdrahtet.
+- Gruppen koennen erstellt, benannt, verwaltet und geloescht werden.
+- Party/Gruppe erscheinen als Threads im Nachrichten-Tab.
+- Supabase-Migration erstellt: `supabase/migrations/20260525190000_groups_parties_messages.sql`
+- User hat SQL fuer Tabellen + RLS-Policies in Supabase ausgefuehrt.
+
+### App-Icon
+- User waehlte Logo-Variante 3: zwei Sprechblasen mit Kartengrid, ohne Punkt/Pin.
+- Implementiert als:
+  - `artifacts/mobile/assets/images/icon.png`
+  - `artifacts/mobile/assets/images/splash-icon.png`
+- Naechster Schritt: nativer iOS-Rebuild, um Icon sichtbar zu machen.
 
 ## Zuletzt erledigt (2026-05-25) — Session 4
 

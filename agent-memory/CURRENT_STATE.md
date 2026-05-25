@@ -1,6 +1,6 @@
 # Current State
 
-Stand: 2026-05-24
+Stand: 2026-05-25
 
 ## Kurzfassung
 
@@ -31,6 +31,29 @@ Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator.
 - Party-Marker zoomt beim Klick rein; erneuter Klick soll zur vorherigen Zoomstufe zurück.
 - Karte nutzt Comic/Neon-inspirierte POIs, 3D-Buildings und Dev-3D-Button.
 - Aktueller Grafikstil ist `neon`.
+- Gruppen- und Partymechanik ist app-weit im `AppContext` verdrahtet.
+- Supabase-Migration fuer `groups`, `group_members` und `chat_messages` wurde erstellt und vom User in Supabase ausgefuehrt.
+- Neues App-Icon wurde aus der gewaehlten Logo-Variante 3 umgesetzt:
+  - `artifacts/mobile/assets/images/icon.png`
+  - `artifacts/mobile/assets/images/splash-icon.png`
+- Naechster wichtiger Schritt: nativer iOS-Rebuild, damit das neue App-Icon auf dem Simulator/Home-Screen sichtbar wird.
+
+## Naechster wichtiger Schritt
+
+Native iOS-App neu bauen/installieren, weil App-Icon-Assets nicht per Metro/Fast Refresh auf dem Homescreen aktualisiert werden.
+
+Empfohlener Befehl:
+
+```bash
+cd /Users/razvan/Desktop/Local-Connect/artifacts/mobile
+pnpm exec expo run:ios
+```
+
+Danach pruefen:
+
+- iPhone Simulator zeigt neues Locals-App-Icon.
+- Splash-Icon ist aktualisiert.
+- App startet weiterhin mit Supabase-Verbindung.
 
 ## Aktueller Stil-Stand
 
@@ -82,19 +105,27 @@ pnpm exec expo start --dev-client --host localhost
 <!-- APP_SYNC_STATUS_START -->
 ## Letzter Sync
 
-- Timestamp UTC: 20260525T140256Z
+- Timestamp UTC: 20260525T204258Z
 - Projekt: Local-Connect
 - Branch: master
-- Commit vor Sync: 5c4e2b8
-- Lokale Änderungen vor Memory-Update: 5
+- Commit vor Sync: b0706c6
+- Lokale Änderungen vor Memory-Update: 13
+- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260525T204258Z
 - Hinweis: Dieser Block wird automatisch von /sync aktualisiert.
 
 ### Geänderte Dateien vor Sync
 
-- artifacts/mobile/app/(tabs)/_layout.tsx
-- artifacts/mobile/app/(tabs)/index.tsx
-- artifacts/mobile/app/(tabs)/map.tsx
-- artifacts/mobile/app/(tabs)/profile.tsx
-- artifacts/mobile/context/AppContext.tsx
+- ` M agent-memory/CLAUDE_MEMORY.md`
+- ` M agent-memory/CODEX_HANDOFF.md`
+- ` M agent-memory/CURRENT_STATE.md`
+- ` M artifacts/mobile/app/(tabs)/_layout.tsx`
+- ` M artifacts/mobile/app/(tabs)/index.tsx`
+- ` M artifacts/mobile/app/(tabs)/map.tsx`
+- ` M artifacts/mobile/app/(tabs)/profile.tsx`
+- ` M artifacts/mobile/app/presence-choice.tsx`
+- ` M artifacts/mobile/assets/images/icon.png`
+- ` M artifacts/mobile/assets/images/splash-icon.png`
+- ` M artifacts/mobile/constants/graphicStyles.ts`
+- ` M artifacts/mobile/context/AppContext.tsx`
+- `?? supabase/migrations/20260525190000_groups_parties_messages.sql`
 <!-- APP_SYNC_STATUS_END -->
-

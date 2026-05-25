@@ -18,7 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
-import { ChatMessage, Party, User, useApp } from "@/context/AppContext";
+import { ChatMessage, Group, Party, User, useApp } from "@/context/AppContext";
 
 const TAB_BAR_OVERLAY_HEIGHT = 84;
 const EMOJI_PANEL_HEIGHT = 280;
@@ -81,6 +81,15 @@ type ChatThread =
       icon: string;
       messages: ChatMessage[];
       party: Party;
+    }
+  | {
+      type: "group";
+      id: string;
+      name: string;
+      subtitle: string;
+      icon: string;
+      messages: ChatMessage[];
+      group: Group;
     };
 
 // ── Demo data ────────────────────────────────────────────────────────────────
@@ -185,6 +194,26 @@ function toPartyThreads(parties: Party[], currentUserId: string): ChatThread[] {
   });
 }
 
+function toGroupThreads(groups: Group[], currentUserId: string): ChatThread[] {
+  return groups.map((group) => {
+    const firstMember = group.members[0];
+    const secondMember = group.members[1];
+    return {
+      type: "group",
+      id: `group:${group.id}`,
+      name: group.name,
+      subtitle: `${group.members.length} Mitglieder · ${group.ownerName}`,
+      icon: "👥",
+      group,
+      messages: [
+        { id: `${group.id}-group-1`, senderId: group.ownerId, text: `${group.ownerName} hat die Gruppe erstellt.`, time: "Jetzt" },
+        { id: `${group.id}-group-2`, senderId: firstMember?.id ?? group.ownerId, text: firstMember ? `${firstMember.name} ist dabei.` : "Wer ist dabei?", time: "Jetzt" },
+        { id: `${group.id}-group-3`, senderId: currentUserId, text: secondMember ? `${secondMember.name} ist auch eingeladen.` : "Ich bin dabei.", time: "Jetzt" },
+      ],
+    };
+  });
+}
+
 // ── Emoji Picker ─────────────────────────────────────────────────────────────
 function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
   const [activeCat, setActiveCat] = useState(EMOJI_CATEGORIES[0].id);
@@ -264,7 +293,7 @@ function nowTime() {
 
 // ── Main screen ──────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const { currentUser, posts, parties, mapFriends, localMessages, addLocalMessage } = useApp();
+  const { currentUser, posts, parties, groups, mapFriends, localMessages, addLocalMessage } = useApp();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
@@ -279,6 +308,7 @@ export default function HomeScreen() {
 
   const contacts = useMemo(() => toChatContacts(posts.map((p) => p.user), currentUser.id), [currentUser.id, posts]);
   const partyThreads = useMemo(() => toPartyThreads(parties, currentUser.id), [currentUser.id, parties]);
+  const groupThreads = useMemo(() => toGroupThreads(groups, currentUser.id), [currentUser.id, groups]);
   const profileThreads = useMemo<ChatThread[]>(
     () => contacts.map((c) => ({ type: "profile", id: c.id, name: c.name, subtitle: c.status, avatar: c.avatar, messages: c.messages, username: c.username, status: c.status })),
     [contacts],
@@ -303,8 +333,8 @@ export default function HomeScreen() {
   const threads = useMemo(() => {
     const profileIds = new Set(profileThreads.map((t) => t.id));
     const newFriends = mapFriendThreads.filter((t) => !profileIds.has(t.id));
-    return [...partyThreads, ...newFriends, ...profileThreads];
-  }, [mapFriendThreads, partyThreads, profileThreads]);
+    return [...partyThreads, ...groupThreads, ...newFriends, ...profileThreads];
+  }, [groupThreads, mapFriendThreads, partyThreads, profileThreads]);
   const [selectedId, setSelectedId] = useState(threads[0]?.id ?? "");
   const selectedThread = useMemo(() => threads.find((t) => t.id === selectedId) ?? threads[0], [selectedId, threads]);
 
@@ -403,11 +433,11 @@ export default function HomeScreen() {
             const selected = thread.id === selectedThread?.id;
             return (
               <Pressable key={thread.id} style={({ pressed }) => [styles.person, selected && styles.personSelected, { opacity: pressed ? 0.75 : 1 }]} onPress={() => selectContact(thread.id)}>
-                <View style={[styles.avatarRing, thread.type === "party" && styles.partyRing, selected && styles.avatarRingSelected]}>
-                  {thread.type === "party"
-                    ? <Text style={styles.partyThreadIcon}>🎉</Text>
+                <View style={[styles.avatarRing, thread.type !== "profile" && styles.partyRing, selected && styles.avatarRingSelected]}>
+                  {thread.type !== "profile"
+                    ? <Text style={styles.partyThreadIcon}>{thread.type === "party" ? "🎉" : "👥"}</Text>
                     : <Image source={{ uri: thread.avatar }} style={styles.avatar} contentFit="cover" />}
-                  <View style={[styles.onlineDot, thread.type === "party" && styles.partyDot]} />
+                  <View style={[styles.onlineDot, thread.type !== "profile" && styles.partyDot]} />
                 </View>
                 <Text style={[styles.personName, selected && styles.personNameSelected]} numberOfLines={1}>{thread.name}</Text>
               </Pressable>
@@ -420,8 +450,8 @@ export default function HomeScreen() {
         <>
           {/* Chat header */}
           <View style={styles.chatHeader}>
-            {selectedThread.type === "party"
-              ? <View style={[styles.chatAvatar, styles.chatPartyAvatar]}><Text style={styles.chatPartyIcon}>🎉</Text></View>
+            {selectedThread.type !== "profile"
+              ? <View style={[styles.chatAvatar, styles.chatPartyAvatar]}><Text style={styles.chatPartyIcon}>{selectedThread.type === "party" ? "🎉" : "👥"}</Text></View>
               : <Image source={{ uri: selectedThread.avatar }} style={styles.chatAvatar} contentFit="cover" />}
             <View style={styles.chatHeaderText}>
               <Text style={styles.chatName}>{selectedThread.name}</Text>
@@ -590,31 +620,31 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 18, paddingBottom: 14,
     backgroundColor: Colors.light.background,
-    borderBottomWidth: 3, borderBottomColor: Colors.light.text,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
   },
   headerBtn: {
-    width: 44, height: 44, borderRadius: Colors.shape.radiusSm,
+    width: 40, height: 40, borderRadius: 20,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: Colors.light.yellow,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
     shadowColor: Colors.shadow.color,
     shadowOffset: { width: 0, height: Colors.shadow.offsetY },
     shadowOpacity: Colors.shadow.opacity, shadowRadius: Colors.shadow.radius,
   },
 
-  peopleWrap: { backgroundColor: Colors.light.backgroundTertiary, borderBottomWidth: 3, borderBottomColor: Colors.light.text },
+  peopleWrap: { backgroundColor: Colors.light.background, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator },
   peopleList: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 14, gap: 12 },
   person: { width: 72, alignItems: "center", gap: 7 },
   personSelected: { transform: [{ translateY: -1 }] },
   avatarRing: {
-    width: 64, height: 64, borderRadius: 32, padding: 3,
-    borderWidth: Colors.shape.borderWidth, borderColor: Colors.light.text,
+    width: 62, height: 62, borderRadius: 31, padding: 3,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
     backgroundColor: Colors.light.backgroundSecondary,
     shadowColor: Colors.shadow.color,
     shadowOffset: { width: 0, height: Colors.shadow.offsetY },
     shadowOpacity: Colors.shadow.opacity, shadowRadius: Colors.shadow.radius,
   },
-  avatarRingSelected: { borderColor: Colors.light.tint, backgroundColor: Colors.light.yellow },
+  avatarRingSelected: { borderColor: Colors.light.tint, backgroundColor: Colors.light.tint + "18" },
   partyRing: { alignItems: "center", justifyContent: "center", backgroundColor: partyThreadSurface },
   partyThreadIcon: { fontSize: 28, lineHeight: 34 },
   avatar: { width: "100%", height: "100%", borderRadius: 28, backgroundColor: Colors.light.backgroundSecondary },
@@ -630,19 +660,19 @@ const styles = StyleSheet.create({
   chatHeader: {
     flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14, gap: 11,
     backgroundColor: Colors.light.backgroundSecondary,
-    borderBottomWidth: 3, borderBottomColor: Colors.light.text,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
   },
-  chatAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: Colors.light.backgroundSecondary, borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text },
+  chatAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: Colors.light.backgroundSecondary, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator },
   chatPartyAvatar: { alignItems: "center", justifyContent: "center", backgroundColor: partyThreadSurface },
   chatPartyIcon: { fontSize: 24, lineHeight: 30 },
   chatHeaderText: { flex: 1, minWidth: 0 },
   chatName: { fontSize: 17, fontFamily: "Inter_700Bold", color: Colors.light.text },
   chatStatus: { marginTop: 2, fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.light.textSecondary },
   moreBtn: {
-    width: 36, height: 36, borderRadius: Colors.shape.radiusSm,
+    width: 36, height: 36, borderRadius: 18,
     alignItems: "center", justifyContent: "center",
     backgroundColor: utilityButtonSurface,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
   },
 
   messages: { flex: 1 },
@@ -651,9 +681,9 @@ const styles = StyleSheet.create({
   messageRowMine: { justifyContent: "flex-end" },
   messageRowTheirs: { justifyContent: "flex-start" },
   bubble: {
-    maxWidth: "78%", borderRadius: Colors.shape.radiusSm,
+    maxWidth: "78%", borderRadius: 18,
     paddingHorizontal: 13, paddingVertical: 10,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    borderWidth: 0,
     shadowColor: Colors.shadow.color,
     shadowOffset: { width: 0, height: Colors.shadow.offsetY },
     shadowOpacity: 0.18, shadowRadius: Colors.shadow.radius,
@@ -670,23 +700,23 @@ const styles = StyleSheet.create({
 
   composer: {
     paddingHorizontal: 14, paddingTop: 10,
-    borderTopWidth: 3, borderTopColor: Colors.light.text,
-    backgroundColor: Colors.light.backgroundTertiary,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.light.separator,
+    backgroundColor: Colors.light.background,
   },
   composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, marginBottom: 8 },
   mediaBtn: {
-    width: 44, height: 44, borderRadius: Colors.shape.radiusSm,
+    width: 42, height: 42, borderRadius: 21,
     alignItems: "center", justifyContent: "center",
     backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
   },
   inputWrap: {
-    flex: 1, minHeight: 48, borderRadius: Colors.shape.radiusSm,
+    flex: 1, minHeight: 48, borderRadius: 24,
     backgroundColor: Colors.light.backgroundSecondary,
     flexDirection: "row", alignItems: "flex-end",
     paddingLeft: 14, paddingRight: 6, paddingVertical: 4,
     gap: 4,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
   },
   input: {
     flex: 1, minHeight: 38, maxHeight: 120,
@@ -701,10 +731,10 @@ const styles = StyleSheet.create({
   emojiToggleBtnActive: { backgroundColor: Colors.light.backgroundTertiary },
   emojiToggleIcon: { fontSize: 22 },
   sendBtn: {
-    width: 38, height: 38, borderRadius: Colors.shape.radiusSm,
+    width: 38, height: 38, borderRadius: 19,
     backgroundColor: Colors.light.tint,
     alignItems: "center", justifyContent: "center",
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    borderWidth: 0,
     marginBottom: 2,
   },
 
@@ -713,16 +743,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.background,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     paddingTop: 12, paddingHorizontal: 20, gap: 12,
-    borderTopWidth: 3, borderTopColor: Colors.light.text,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.light.separator,
   },
   mediaSheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.light.separator, alignSelf: "center", marginBottom: 8 },
   mediaSheetTitle: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.light.text, marginBottom: 4 },
   mediaOption: {
     flexDirection: "row", alignItems: "center", gap: 16,
     paddingVertical: 14, paddingHorizontal: 16,
-    borderRadius: Colors.shape.radiusSm,
+    borderRadius: Colors.shape.radiusMd,
     backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
   },
   mediaOptionIcon: { width: 48, height: 48, borderRadius: Colors.shape.radiusSm, alignItems: "center", justifyContent: "center" },
   mediaOptionLabel: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.light.text },
@@ -732,8 +762,8 @@ const styles = StyleSheet.create({
 
   searchOverlay: { flex: 1, justifyContent: "center", paddingHorizontal: 20, backgroundColor: "rgba(21,34,56,0.42)" },
   searchPanel: {
-    maxHeight: "72%", borderRadius: Colors.shape.radiusSm,
-    borderWidth: Colors.shape.borderWidth, borderColor: Colors.light.text,
+    maxHeight: "72%", borderRadius: Colors.shape.radiusLg,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
     backgroundColor: Colors.light.background,
     shadowColor: Colors.shadow.color,
     shadowOffset: { width: 0, height: Colors.shadow.offsetY + 4 },
@@ -743,25 +773,25 @@ const styles = StyleSheet.create({
   searchPanelHeader: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 3, borderBottomColor: Colors.light.text,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
     backgroundColor: Colors.light.backgroundTertiary,
   },
   searchTitle: {
     fontSize: 22, fontFamily: "Inter_700Bold", color: Colors.light.text,
-    textShadowColor: Colors.typography.displayShadowColor,
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: Colors.typography.displayShadowRadius,
+    textShadowColor: "transparent",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 0,
   },
   closeBtn: {
-    width: 34, height: 34, borderRadius: Colors.shape.radiusSm,
+    width: 34, height: 34, borderRadius: 17,
     alignItems: "center", justifyContent: "center",
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
-    backgroundColor: Colors.light.yellow,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
+    backgroundColor: Colors.light.backgroundSecondary,
   },
   profileSearchInputWrap: {
     minHeight: 50, margin: 14, paddingHorizontal: 12,
-    borderRadius: Colors.shape.radiusSm,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
     backgroundColor: Colors.light.backgroundSecondary,
     flexDirection: "row", alignItems: "center", gap: 8,
   },
@@ -769,12 +799,12 @@ const styles = StyleSheet.create({
   searchResults: { maxHeight: 360 },
   searchResultsContent: { paddingHorizontal: 14, paddingBottom: 14, gap: 10 },
   searchResult: {
-    minHeight: 68, borderRadius: Colors.shape.radiusSm,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+    minHeight: 68, borderRadius: Colors.shape.radiusMd,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
     backgroundColor: Colors.light.backgroundSecondary,
     flexDirection: "row", alignItems: "center", paddingHorizontal: 10, gap: 10,
   },
-  searchResultAvatar: { width: 46, height: 46, borderRadius: 23, borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text, backgroundColor: Colors.light.backgroundSecondary },
+  searchResultAvatar: { width: 46, height: 46, borderRadius: 23, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator, backgroundColor: Colors.light.backgroundSecondary },
   searchResultText: { flex: 1, minWidth: 0 },
   searchResultName: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.light.text },
   searchResultMeta: { marginTop: 2, fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.light.textSecondary },

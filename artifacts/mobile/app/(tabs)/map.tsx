@@ -10,6 +10,7 @@ import {
   Alert,
   Animated,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -24,7 +25,7 @@ import Svg, { Circle, Path } from "react-native-svg";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 
 import Colors from "@/constants/colors";
-import { Party, PartyMember, useApp } from "@/context/AppContext";
+import { Group, Party, PartyMember, useApp } from "@/context/AppContext";
 import { useAuth } from "@/context/AuthContext";
 import { useLocation } from "@/context/LocationContext";
 import { useProximity } from "@/context/ProximityContext";
@@ -160,6 +161,250 @@ function areLivePoisEqual(a: LivePoi[], b: LivePoi[]): boolean {
     }
   }
   return true;
+}
+
+function GroupSwipeCard({
+  group,
+  isOpen,
+  onPress,
+  onDelete,
+}: {
+  group: Group;
+  isOpen: boolean;
+  onPress: () => void;
+  onDelete: () => void;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const offsetXRef = useRef(0);
+  const dragXRef = useRef(0);
+  const didSwipeLeftRef = useRef(false);
+  const deleteWidth = 54;
+  const swipeStartThreshold = 2;
+
+  const snapTo = useCallback((value: number) => {
+    offsetXRef.current = value;
+    Animated.spring(translateX, {
+      toValue: value,
+      useNativeDriver: true,
+      damping: 18,
+      stiffness: 220,
+      mass: 0.8,
+    }).start();
+  }, [translateX]);
+
+  const snapOpen = useCallback(() => {
+    offsetXRef.current = -deleteWidth;
+    Animated.sequence([
+      Animated.timing(translateX, {
+        toValue: -deleteWidth - 8,
+        duration: 90,
+        useNativeDriver: true,
+      }),
+      Animated.spring(translateX, {
+        toValue: -deleteWidth,
+        useNativeDriver: true,
+        damping: 12,
+        stiffness: 180,
+        mass: 0.7,
+      }),
+    ]).start();
+  }, [translateX]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dx) > swipeStartThreshold && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderGrant: () => {
+          dragXRef.current = offsetXRef.current;
+          didSwipeLeftRef.current = false;
+        },
+        onPanResponderMove: (_, gesture) => {
+          const next = Math.max(-deleteWidth, Math.min(0, offsetXRef.current + gesture.dx));
+          dragXRef.current = next;
+          if (gesture.dx < 0 || next < offsetXRef.current) {
+            didSwipeLeftRef.current = true;
+          }
+          translateX.setValue(next);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          const shouldReveal = didSwipeLeftRef.current || gesture.dx < 0 || gesture.vx < -0.05;
+          const shouldClose = gesture.dx > 0 || gesture.vx > 0.05;
+          if (!shouldReveal && !shouldClose) {
+            snapTo(offsetXRef.current);
+            return;
+          }
+          if (shouldReveal) {
+            snapOpen();
+          } else {
+            snapTo(0);
+          }
+        },
+        onPanResponderTerminate: () => {
+          if (didSwipeLeftRef.current || dragXRef.current < 0) {
+            snapOpen();
+          } else {
+            snapTo(offsetXRef.current);
+          }
+        },
+      }),
+    [snapOpen, snapTo, swipeStartThreshold, translateX],
+  );
+
+  return (
+    <View style={styles.groupSwipeRow}>
+      <Pressable
+        style={styles.groupDeleteAction}
+        onPress={() => {
+          snapTo(0);
+          onDelete();
+        }}
+      >
+        <Feather name="x" size={18} color="#fff" />
+      </Pressable>
+      <Animated.View style={[styles.groupSwipeFront, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
+        <Pressable
+          style={styles.myPartyCard}
+          onPress={() => {
+            if (offsetXRef.current < 0) return;
+            onPress();
+          }}
+        >
+          <View style={styles.groupCardIcon}>
+            <Feather name="users" size={15} color={Colors.light.tint} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.myPartyCardName} numberOfLines={1}>{group.name}</Text>
+            <Text style={styles.myPartyCardSub}>
+              {group.members.length} Mitglied{group.members.length !== 1 ? "er" : ""}
+            </Text>
+          </View>
+          <Feather name={isOpen ? "chevron-up" : "chevron-down"} size={16} color={Colors.light.textSecondary} />
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+function PartySwipeCard({
+  party,
+  isOpen,
+  onPress,
+  onDelete,
+}: {
+  party: Party;
+  isOpen: boolean;
+  onPress: () => void;
+  onDelete: () => void;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const offsetXRef = useRef(0);
+  const dragXRef = useRef(0);
+  const didSwipeLeftRef = useRef(false);
+  const deleteWidth = 54;
+  const swipeStartThreshold = 2;
+
+  const snapTo = useCallback((value: number) => {
+    offsetXRef.current = value;
+    Animated.spring(translateX, {
+      toValue: value,
+      useNativeDriver: true,
+      damping: 18,
+      stiffness: 220,
+      mass: 0.8,
+    }).start();
+  }, [translateX]);
+
+  const snapOpen = useCallback(() => {
+    offsetXRef.current = -deleteWidth;
+    Animated.sequence([
+      Animated.timing(translateX, {
+        toValue: -deleteWidth - 8,
+        duration: 90,
+        useNativeDriver: true,
+      }),
+      Animated.spring(translateX, {
+        toValue: -deleteWidth,
+        useNativeDriver: true,
+        damping: 12,
+        stiffness: 180,
+        mass: 0.7,
+      }),
+    ]).start();
+  }, [translateX]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dx) > swipeStartThreshold && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderGrant: () => {
+          dragXRef.current = offsetXRef.current;
+          didSwipeLeftRef.current = false;
+        },
+        onPanResponderMove: (_, gesture) => {
+          const next = Math.max(-deleteWidth, Math.min(0, offsetXRef.current + gesture.dx));
+          dragXRef.current = next;
+          if (gesture.dx < 0 || next < offsetXRef.current) {
+            didSwipeLeftRef.current = true;
+          }
+          translateX.setValue(next);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          const shouldReveal = didSwipeLeftRef.current || gesture.dx < 0 || gesture.vx < -0.05;
+          const shouldClose = gesture.dx > 0 || gesture.vx > 0.05;
+          if (!shouldReveal && !shouldClose) {
+            snapTo(offsetXRef.current);
+            return;
+          }
+          if (shouldReveal) {
+            snapOpen();
+          } else {
+            snapTo(0);
+          }
+        },
+        onPanResponderTerminate: () => {
+          if (didSwipeLeftRef.current || dragXRef.current < 0) {
+            snapOpen();
+          } else {
+            snapTo(offsetXRef.current);
+          }
+        },
+      }),
+    [snapOpen, snapTo, swipeStartThreshold, translateX],
+  );
+
+  return (
+    <View style={styles.groupSwipeRow}>
+      <Pressable
+        style={styles.groupDeleteAction}
+        onPress={() => {
+          snapTo(0);
+          onDelete();
+        }}
+      >
+        <Feather name="x" size={18} color="#fff" />
+      </Pressable>
+      <Animated.View style={[styles.groupSwipeFront, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
+        <Pressable
+          style={styles.myPartyCard}
+          onPress={() => {
+            if (offsetXRef.current < 0) return;
+            onPress();
+          }}
+        >
+          <Text style={styles.myPartyCardEmoji}>🎉</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.myPartyCardName} numberOfLines={1}>{party.name}</Text>
+            <Text style={styles.myPartyCardSub}>
+              {party.members.length} Mitglied{party.members.length !== 1 ? "er" : ""}
+            </Text>
+          </View>
+          <Feather name={isOpen ? "chevron-up" : "chevron-down"} size={16} color={Colors.light.textSecondary} />
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
 }
 
 
@@ -1870,7 +2115,20 @@ function buildMapHtml(
 export default function MapScreen() {
   const { user } = useAuth();
   const { homeLocation, currentLocationName, effectivePresenceMode } = useLocation();
-  const { posts, parties: storedParties, createParty, deleteParty, updatePartyMembers, currentUser, setMapFriends, addLocalMessage } = useApp();
+  const {
+    posts,
+    parties: storedParties,
+    groups,
+    createGroup,
+    deleteGroup,
+    updateGroupMembers,
+    createParty,
+    deleteParty,
+    updatePartyMembers,
+    currentUser,
+    setMapFriends,
+    addLocalMessage,
+  } = useApp();
   const { nearbyUsers: radarUsers, radarSettings, myLiveLocation } = useProximity();
   const insets = useSafeAreaInsets();
 
@@ -1951,9 +2209,15 @@ export default function MapScreen() {
   }, [injectRadar, injectTimeOfDay]);
 
   const [showPartyComposer, setShowPartyComposer] = useState(false);
+  const [createComposerMode, setCreateComposerMode] = useState<"group" | "party" | null>(null);
+  const [groupName, setGroupName] = useState("");
   const [partyName, setPartyName] = useState("");
   const [partyAddress, setPartyAddress] = useState("");
   const [selectedPartyMemberIds, setSelectedPartyMemberIds] = useState<string[]>([]);
+  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([]);
+  const [groupDropdownId, setGroupDropdownId] = useState<string | null>(null);
+  const [groupManageSubview, setGroupManageSubview] = useState<"add" | "remove" | null>(null);
+  const [groupAddIds, setGroupAddIds] = useState<string[]>([]);
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [partyManageSubview, setPartyManageSubview] = useState<"add" | "remove" | null>(null);
   const [partyAddIds, setPartyAddIds] = useState<string[]>([]);
@@ -2373,6 +2637,16 @@ out center tags ${LIVE_POI_LIMIT};`;
     [partyPickerUsers, selectedPartyMemberIds]
   );
 
+  const groupPickerUsers = useMemo(
+    () => partyPickerUsers.filter((u) => u.isFriend),
+    [partyPickerUsers]
+  );
+
+  const selectedGroupMembers = useMemo(
+    () => groupPickerUsers.filter((u) => selectedGroupMemberIds.includes(u.id)),
+    [groupPickerUsers, selectedGroupMemberIds]
+  );
+
   const myParty = useMemo(
     () => storedParties.find((p) => p.hostId === currentUser.id) ?? null,
     [storedParties, currentUser.id]
@@ -2380,6 +2654,14 @@ out center tags ${LIVE_POI_LIMIT};`;
 
   const togglePartyMember = useCallback((id: string) => {
     setSelectedPartyMemberIds((current) =>
+      current.includes(id)
+        ? current.filter((memberId) => memberId !== id)
+        : [...current, id]
+    );
+  }, []);
+
+  const toggleGroupMember = useCallback((id: string) => {
+    setSelectedGroupMemberIds((current) =>
       current.includes(id)
         ? current.filter((memberId) => memberId !== id)
         : [...current, id]
@@ -2490,9 +2772,66 @@ out center tags ${LIVE_POI_LIMIT};`;
     setPartyName("");
     setPartyAddress("");
     setSelectedPartyMemberIds([]);
+    setCreateComposerMode(null);
     setShowPartyComposer(false);
   }, [effectivePresenceMode, homeLocation, partyName, partyAddress, selectedPartyMembers, createParty,
       currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode]);
+
+  const handleCreateGroup = useCallback(() => {
+    if (effectivePresenceMode === "home") {
+      Alert.alert(
+        "Daheim-Modus",
+        "Du bist gerade passiv unterwegs. Wechsle zu Online, um eine Gruppe zu starten.",
+      );
+      return;
+    }
+    if (selectedGroupMembers.length === 0) return;
+    if (Platform.OS !== "web") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+    const groupId = createGroup(groupName.trim() || `Gruppe ${groups.length + 1}`, selectedGroupMembers);
+    setGroupName("");
+    setSelectedGroupMemberIds([]);
+    setGroupDropdownId(groupId);
+    setGroupManageSubview(null);
+  }, [createGroup, effectivePresenceMode, groupName, groups.length, selectedGroupMembers]);
+
+  const handleSaveGroupMembers = useCallback((groupId: string) => {
+    if (groupAddIds.length === 0) return;
+    const nextMembers = groupPickerUsers
+      .filter((friend) => groupAddIds.includes(friend.id))
+      .map((friend) => ({
+        id: friend.id,
+        name: friend.name,
+        avatar: friend.avatar,
+        activity: friend.activity,
+      }));
+    const group = groups.find((item) => item.id === groupId);
+    if (!group) return;
+    const existingIds = new Set(group.members.map((member) => member.id));
+    updateGroupMembers(groupId, [
+      ...group.members,
+      ...nextMembers.filter((member) => !existingIds.has(member.id)),
+    ]);
+    setGroupAddIds([]);
+    setGroupManageSubview(null);
+  }, [groupAddIds, groupPickerUsers, groups, updateGroupMembers]);
+
+  const handleRemoveGroupMember = useCallback((groupId: string, memberId: string) => {
+    const group = groups.find((item) => item.id === groupId);
+    if (!group) return;
+    updateGroupMembers(groupId, group.members.filter((member) => member.id !== memberId));
+  }, [groups, updateGroupMembers]);
+
+  const handleDeleteGroup = useCallback((groupId: string) => {
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    deleteGroup(groupId);
+    setGroupDropdownId((openId) => openId === groupId ? null : openId);
+    setGroupManageSubview(null);
+    setGroupAddIds([]);
+  }, [deleteGroup]);
 
   const handleSendUserMessage = useCallback(() => {
     if (!userPanelDraft.trim() || !selectedMapUser) return;
@@ -2828,14 +3167,23 @@ out center tags ${LIVE_POI_LIMIT};`;
               );
               return;
             }
-            setShowPartyComposer((open) => !open);
+            setShowPartyComposer((open) => {
+              if (open) {
+                setCreateComposerMode(null);
+                setGroupDropdownId(null);
+                setGroupManageSubview(null);
+                setPartyDropdownOpen(false);
+                setPartyManageSubview(null);
+              }
+              return !open;
+            });
             setFilterMenuOpen(false);
             setPresenceMenuOpen(false);
           }}
         >
           <View style={styles.partyComposerTitleWrap}>
-            <PartyPopperIcon size={showPartyComposer ? 18 : 24} />
-            {showPartyComposer && <Text style={styles.fabLabel}>Party</Text>}
+            <Feather name={showPartyComposer ? "x" : "plus"} size={showPartyComposer ? 20 : 24} color="#fff" />
+            {showPartyComposer && <Text style={styles.fabLabel}>Erstellen</Text>}
           </View>
           {showPartyComposer && (
             <Feather name="chevron-down" size={18} color="#fff" />
@@ -2846,29 +3194,231 @@ out center tags ${LIVE_POI_LIMIT};`;
           pointerEvents={showPartyComposer ? "auto" : "none"}
           style={[styles.partyComposerBody, { opacity: partyPanelOpacity }]}
         >
-          {myParty ? (
-            /* ── Management UI (party already exists) ── */
-            <ScrollView
-              style={styles.partyComposerScroll}
-              contentContainerStyle={styles.partyComposerScrollContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
+          <ScrollView
+            style={styles.partyComposerScroll}
+            contentContainerStyle={styles.partyComposerScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
+            <Pressable
+              style={[styles.createModeCard, createComposerMode === "group" && styles.createModeCardActive]}
+              onPress={() => setCreateComposerMode((mode) => mode === "group" ? null : "group")}
             >
-              {/* Party card – tap opens dropdown */}
-              <Pressable
-                style={styles.myPartyCard}
+              <View style={styles.createModeIcon}>
+                <Feather name="users" size={16} color={partyAccent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.createModeTitle}>Gruppe erstellen</Text>
+                <Text style={styles.createModeSub} numberOfLines={1}>Freunde einladen und entfernen</Text>
+              </View>
+              <Feather name={createComposerMode === "group" ? "chevron-up" : "chevron-down"} size={16} color={Colors.light.textSecondary} />
+            </Pressable>
+
+            {createComposerMode === "group" && (
+              <View style={styles.createDropdown}>
+                {groups.length > 0 && (
+                  <>
+                    <Text style={styles.partyFieldLabel}>Deine Gruppen</Text>
+                    {groups.map((group) => {
+                      const isOpen = groupDropdownId === group.id;
+                      const availableFriends = groupPickerUsers.filter(
+                        (friend) => !group.members.some((member) => member.id === friend.id)
+                      );
+                      return (
+                        <View key={group.id} style={styles.groupManageBlock}>
+                          <GroupSwipeCard
+                            group={group}
+                            isOpen={isOpen}
+                            onPress={() => {
+                              setGroupDropdownId((openId) => openId === group.id ? null : group.id);
+                              setGroupManageSubview(null);
+                              setGroupAddIds([]);
+                            }}
+                            onDelete={() => handleDeleteGroup(group.id)}
+                          />
+
+                          {isOpen && groupManageSubview === null && (
+                            <View style={styles.partyDropdown}>
+                              <Pressable style={styles.partyDropdownItem} onPress={() => { setGroupManageSubview("add"); setGroupAddIds([]); }}>
+                                <Feather name="user-plus" size={14} color={partyAccent} />
+                                <Text style={styles.partyDropdownText}>Mitglied hinzufügen</Text>
+                              </Pressable>
+                              <View style={styles.partyDropdownDivider} />
+                              <Pressable style={styles.partyDropdownItem} onPress={() => setGroupManageSubview("remove")}>
+                                <Feather name="user-minus" size={14} color={Colors.light.textSecondary} />
+                                <Text style={styles.partyDropdownText}>Mitglied entfernen</Text>
+                              </Pressable>
+                            </View>
+                          )}
+
+                          {isOpen && groupManageSubview === "add" && (
+                            <View style={{ gap: 8 }}>
+                              <Pressable style={styles.partyBackRow} onPress={() => setGroupManageSubview(null)}>
+                                <Feather name="arrow-left" size={13} color={Colors.light.textSecondary} />
+                                <Text style={styles.partyBackText}>Mitglied hinzufügen</Text>
+                              </Pressable>
+                              <TouchableOpacity
+                                style={[styles.partyCreateButton, groupAddIds.length === 0 && styles.createBtnDisabled]}
+                                onPress={() => handleSaveGroupMembers(group.id)}
+                                disabled={groupAddIds.length === 0}
+                                activeOpacity={0.85}
+                              >
+                                <Text style={styles.partyCreateButtonText}>Hinzufügen</Text>
+                              </TouchableOpacity>
+                              <View style={styles.memberPicker}>
+                                {availableFriends.length === 0 ? (
+                                  <Text style={styles.selectedMembersEmpty}>Alle Freunde sind schon dabei</Text>
+                                ) : (
+                                  availableFriends.map((friend) => {
+                                    const selected = groupAddIds.includes(friend.id);
+                                    return (
+                                      <Pressable
+                                        key={friend.id}
+                                        style={[styles.memberOption, selected && styles.memberOptionSelected]}
+                                        onPress={() => setGroupAddIds((ids) => selected ? ids.filter((id) => id !== friend.id) : [...ids, friend.id])}
+                                      >
+                                        <Image source={{ uri: friend.avatar }} style={styles.memberOptionAvatar} />
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={[styles.memberOptionName, selected && styles.memberOptionNameSelected]} numberOfLines={1}>
+                                            {friend.name}
+                                          </Text>
+                                          <Text style={styles.memberOptionSub} numberOfLines={1}>{friend.activity}</Text>
+                                        </View>
+                                        <Feather name={selected ? "check" : "plus"} size={14} color={selected ? partyAccent : Colors.light.textTertiary} />
+                                      </Pressable>
+                                    );
+                                  })
+                                )}
+                              </View>
+                            </View>
+                          )}
+
+                          {isOpen && groupManageSubview === "remove" && (
+                            <View style={{ gap: 8 }}>
+                              <Pressable style={styles.partyBackRow} onPress={() => setGroupManageSubview(null)}>
+                                <Feather name="arrow-left" size={13} color={Colors.light.textSecondary} />
+                                <Text style={styles.partyBackText}>Mitglied entfernen</Text>
+                              </Pressable>
+                              <View style={styles.memberPicker}>
+                                {group.members.length === 0 ? (
+                                  <Text style={styles.selectedMembersEmpty}>Keine Mitglieder</Text>
+                                ) : (
+                                  group.members.map((member) => (
+                                    <Pressable
+                                      key={member.id}
+                                      style={styles.selectedMemberRow}
+                                      onPress={() => handleRemoveGroupMember(group.id, member.id)}
+                                    >
+                                      <Image source={{ uri: member.avatar }} style={styles.partyAvatar} />
+                                      <Text style={styles.selectedMemberName}>{member.name}</Text>
+                                      <Feather name="x" size={14} color="#EF4444" />
+                                    </Pressable>
+                                  ))
+                                )}
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </>
+                )}
+
+                <Text style={styles.partyFieldLabel}>Neue Gruppe</Text>
+                <TextInput
+                  style={styles.partyNameInput}
+                  value={groupName}
+                  onChangeText={setGroupName}
+                  placeholder="z.B. Freitagabend"
+                  placeholderTextColor={Colors.light.textTertiary}
+                  maxLength={40}
+                  returnKeyType="done"
+                  onSubmitEditing={handleCreateGroup}
+                />
+                <TouchableOpacity
+                  style={[styles.partyCreateButton, selectedGroupMembers.length === 0 && styles.createBtnDisabled]}
+                  onPress={handleCreateGroup}
+                  disabled={selectedGroupMembers.length === 0}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.partyCreateButtonText}>Neue Gruppe starten</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.partyFieldLabel}>Eingeladen</Text>
+                <View style={styles.selectedMembersBox}>
+                  {selectedGroupMembers.length > 0 ? (
+                    selectedGroupMembers.map((member) => (
+                      <Pressable
+                        key={member.id}
+                        style={styles.selectedMemberRow}
+                        onPress={() => toggleGroupMember(member.id)}
+                      >
+                        <Image source={{ uri: member.avatar }} style={styles.partyAvatar} />
+                        <Text style={styles.selectedMemberName}>{member.name}</Text>
+                        <Feather name="x" size={14} color={Colors.light.textTertiary} />
+                      </Pressable>
+                    ))
+                  ) : (
+                    <Text style={styles.selectedMembersEmpty}>Noch niemand eingeladen</Text>
+                  )}
+                </View>
+
+                <Text style={styles.partyFieldLabel}>Freunde hinzufügen</Text>
+                <View style={styles.memberPicker}>
+                  {groupPickerUsers.length === 0 ? (
+                    <Text style={styles.selectedMembersEmpty}>Keine Freunde in der Nähe</Text>
+                  ) : (
+                    groupPickerUsers.map((friend) => {
+                      const selected = selectedGroupMemberIds.includes(friend.id);
+                      return (
+                        <Pressable
+                          key={friend.id}
+                          style={[styles.memberOption, selected && styles.memberOptionSelected]}
+                          onPress={() => toggleGroupMember(friend.id)}
+                        >
+                          <Image source={{ uri: friend.avatar }} style={styles.memberOptionAvatar} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.memberOptionName, selected && styles.memberOptionNameSelected]} numberOfLines={1}>
+                              {friend.name}
+                            </Text>
+                            <Text style={styles.memberOptionSub} numberOfLines={1}>{friend.activity}</Text>
+                          </View>
+                          <Feather name={selected ? "check" : "plus"} size={14} color={selected ? partyAccent : Colors.light.textTertiary} />
+                        </Pressable>
+                      );
+                    })
+                  )}
+                </View>
+              </View>
+            )}
+
+            <Pressable
+              style={[styles.createModeCard, createComposerMode === "party" && styles.createModeCardActive]}
+              onPress={() => setCreateComposerMode((mode) => mode === "party" ? null : "party")}
+            >
+              <View style={styles.createModeIcon}>
+                <PartyPopperIcon size={16} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.createModeTitle}>Party erstellen</Text>
+                <Text style={styles.createModeSub} numberOfLines={1}>{myParty ? "Party verwalten" : "Name, Ort und Mitglieder"}</Text>
+              </View>
+              <Feather name={createComposerMode === "party" ? "chevron-up" : "chevron-down"} size={16} color={Colors.light.textSecondary} />
+            </Pressable>
+
+            {createComposerMode === "party" && (
+              <View style={styles.createDropdown}>
+                {myParty ? (
+                  <>
+              <PartySwipeCard
+                party={myParty}
+                isOpen={partyDropdownOpen}
                 onPress={() => {
                   setPartyDropdownOpen((o) => !o);
                   setPartyManageSubview(null);
                 }}
-              >
-                <Text style={styles.myPartyCardEmoji}>🎉</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.myPartyCardName} numberOfLines={1}>{myParty.name}</Text>
-                  <Text style={styles.myPartyCardSub}>{myParty.members.length} Mitglied{myParty.members.length !== 1 ? "er" : ""}</Text>
-                </View>
-                <Feather name={partyDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={Colors.light.textSecondary} />
-              </Pressable>
+                onDelete={handleDeleteParty}
+              />
 
               {/* Dropdown menu */}
               {partyDropdownOpen && partyManageSubview === null && (
@@ -2881,11 +3431,6 @@ out center tags ${LIVE_POI_LIMIT};`;
                   <Pressable style={styles.partyDropdownItem} onPress={() => setPartyManageSubview("remove")}>
                     <Feather name="user-minus" size={14} color={Colors.light.textSecondary} />
                     <Text style={styles.partyDropdownText}>Mitglied entfernen</Text>
-                  </Pressable>
-                  <View style={styles.partyDropdownDivider} />
-                  <Pressable style={styles.partyDropdownItem} onPress={handleDeleteParty}>
-                    <Feather name="trash-2" size={14} color="#EF4444" />
-                    <Text style={[styles.partyDropdownText, { color: "#EF4444" }]}>Party löschen</Text>
                   </Pressable>
                 </View>
               )}
@@ -2956,10 +3501,9 @@ out center tags ${LIVE_POI_LIMIT};`;
                   </View>
                 </View>
               )}
-            </ScrollView>
-          ) : (
-            /* ── Create UI (no party yet) ── */
-            <>
+                  </>
+                ) : (
+                  <>
               <TouchableOpacity
                 style={[styles.partyCreateButton, !canCreateParty && styles.createBtnDisabled]}
                 onPress={handleCreateParty}
@@ -2968,12 +3512,6 @@ out center tags ${LIVE_POI_LIMIT};`;
               >
                 <Text style={styles.partyCreateButtonText}>Party starten</Text>
               </TouchableOpacity>
-              <ScrollView
-                style={styles.partyComposerScroll}
-                contentContainerStyle={styles.partyComposerScrollContent}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator
-              >
                 <Text style={styles.partyFieldLabel}>Partyname</Text>
                 <TextInput
                   ref={inputRef}
@@ -3052,9 +3590,11 @@ out center tags ${LIVE_POI_LIMIT};`;
                     })
                   )}
                 </View>
-              </ScrollView>
-            </>
-          )}
+                  </>
+                )}
+              </View>
+            )}
+          </ScrollView>
         </Animated.View>
       </Animated.View>
 
@@ -3175,14 +3715,14 @@ out center tags ${LIVE_POI_LIMIT};`;
 
 const isNeonMapStyle = Colors.activeStyle.id === "neon";
 const mapPanelBackground = isNeonMapStyle
-  ? "rgba(7,19,31,0.94)"
+  ? "rgba(7,19,31,0.86)"
   : Colors.light.backgroundSecondary;
 const mapPanelActiveBackground = isNeonMapStyle
   ? "rgba(255,43,214,0.18)"
   : Colors.light.backgroundTertiary;
-const mapPanelBorder = Colors.light.separator;
+const mapPanelBorder = Colors.light.separator + "66";
 const mapPanelShadow = isNeonMapStyle ? Colors.light.tintBlue : "#000";
-const mapHeaderBackground = isNeonMapStyle ? "rgba(2,7,13,0.88)" : Colors.light.backgroundSecondary;
+const mapHeaderBackground = isNeonMapStyle ? "rgba(2,7,13,0.76)" : Colors.light.backgroundSecondary;
 const activeBadgeBackground = isNeonMapStyle ? "rgba(0,255,178,0.13)" : Colors.light.backgroundTertiary;
 const activeBadgeColor = Colors.light.mint;
 const countBadgeBackground = isNeonMapStyle ? "rgba(0,240,255,0.12)" : Colors.light.backgroundTertiary;
@@ -3204,7 +3744,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 12,
     backgroundColor: mapHeaderBackground,
-    borderBottomWidth: Colors.shape.borderWidthThin,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: mapPanelBorder,
   },
   headerTitle: {
@@ -3217,7 +3757,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 5,
     backgroundColor: activeBadgeBackground,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
-    borderWidth: Colors.shape.borderWidthThin,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: isNeonMapStyle ? Colors.light.mint : mapPanelBorder,
   },
   badgeDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.light.mint },
@@ -3229,7 +3769,7 @@ const styles = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17,
     alignItems: "center", justifyContent: "center",
     backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: Colors.shape.borderWidthThin,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.light.separator,
   },
   radarBtnActive: {
@@ -3253,8 +3793,8 @@ const styles = StyleSheet.create({
   presenceButton: {
     width: 76,
     minHeight: 40,
-    borderRadius: Colors.shape.radiusSm,
-    borderWidth: Colors.shape.borderWidthThin,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: mapPanelBorder,
     backgroundColor: mapPanelBackground,
     flexDirection: "row",
@@ -3276,8 +3816,8 @@ const styles = StyleSheet.create({
   presenceDropdown: {
     width: 190,
     marginTop: 8,
-    borderRadius: 8,
-    borderWidth: Colors.shape.borderWidthThin,
+    borderRadius: Colors.shape.radiusMd,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: mapPanelBorder,
     backgroundColor: mapPanelBackground,
     padding: 6,
@@ -3290,7 +3830,7 @@ const styles = StyleSheet.create({
   },
   presenceOption: {
     minHeight: 38,
-    borderRadius: 8,
+    borderRadius: 14,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
@@ -3312,8 +3852,8 @@ const styles = StyleSheet.create({
   filterButton: {
     width: 76,
     minHeight: 40,
-    borderRadius: Colors.shape.radiusSm,
-    borderWidth: Colors.shape.borderWidthThin,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: mapPanelBorder,
     backgroundColor: mapPanelBackground,
     flexDirection: "row",
@@ -3344,8 +3884,8 @@ const styles = StyleSheet.create({
   filterDropdown: {
     width: 190,
     marginTop: 8,
-    borderRadius: Colors.shape.radiusSm,
-    borderWidth: Colors.shape.borderWidthThin,
+    borderRadius: Colors.shape.radiusMd,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: mapPanelBorder,
     backgroundColor: mapPanelBackground,
     padding: 6,
@@ -3358,7 +3898,7 @@ const styles = StyleSheet.create({
   },
   filterOption: {
     minHeight: 38,
-    borderRadius: 8,
+    borderRadius: 14,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
@@ -3412,15 +3952,15 @@ const styles = StyleSheet.create({
   partyComposer: {
     position: "absolute",
     left: 16,
-    borderRadius: Colors.shape.radiusSm,
+    borderRadius: Colors.shape.radiusLg,
     backgroundColor: mapPanelBackground,
     overflow: "hidden",
-    borderWidth: Colors.shape.borderWidthThin,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: mapPanelBorder,
     shadowColor: mapPanelShadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
     elevation: 8,
     zIndex: 12,
   },
@@ -3431,7 +3971,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     backgroundColor: partyAccent,
     paddingHorizontal: 14,
-    borderBottomWidth: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: mapPanelBorder,
   },
   partyComposerHeaderClosed: {
@@ -3455,6 +3995,81 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingBottom: 14,
   },
+  createModeCard: {
+    minHeight: 58,
+    borderRadius: Colors.shape.radiusMd,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.light.separator + "77",
+    backgroundColor: Colors.light.backgroundSecondary,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  createModeCardActive: {
+    borderColor: partyAccent,
+    backgroundColor: partyAccentSoft,
+  },
+  createModeIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: partyAccent + "66",
+    backgroundColor: Colors.light.background,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  createModeTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: Colors.light.text,
+  },
+  createModeSub: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "600",
+    color: Colors.light.textSecondary,
+  },
+  createDropdown: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  groupManageBlock: {
+    gap: 8,
+  },
+  groupSwipeRow: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: Colors.shape.radiusMd,
+    backgroundColor: Colors.light.backgroundSecondary,
+  },
+  groupDeleteAction: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 48,
+    borderRadius: 14,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupSwipeFront: {
+    width: "100%",
+    backgroundColor: mapPanelBackground,
+  },
+  groupCardIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: partyAccent + "66",
+    backgroundColor: Colors.light.background,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   partyFieldLabel: {
     fontSize: 11,
     fontWeight: "800",
@@ -3463,9 +4078,9 @@ const styles = StyleSheet.create({
   },
   partyNameInput: {
     height: 40,
-    borderWidth: 1,
-    borderColor: Colors.light.separator,
-    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.light.separator + "77",
+    borderRadius: 14,
     paddingHorizontal: 12,
     fontSize: 14,
     color: Colors.light.text,
@@ -3477,7 +4092,7 @@ const styles = StyleSheet.create({
   },
   selectedMemberRow: {
     minHeight: 38,
-    borderRadius: 8,
+    borderRadius: 14,
     backgroundColor: Colors.light.backgroundSecondary,
     flexDirection: "row",
     alignItems: "center",
@@ -3487,7 +4102,7 @@ const styles = StyleSheet.create({
   partyAvatar: {
     width: 28,
     height: 28,
-    borderRadius: 8,
+    borderRadius: 12,
     backgroundColor: Colors.light.backgroundTertiary,
   },
   selectedMemberName: {
@@ -3498,7 +4113,7 @@ const styles = StyleSheet.create({
   },
   selectedMembersEmpty: {
     minHeight: 38,
-    borderRadius: 8,
+    borderRadius: 14,
     backgroundColor: Colors.light.backgroundSecondary,
     color: Colors.light.textTertiary,
     fontSize: 13,
@@ -3511,9 +4126,9 @@ const styles = StyleSheet.create({
   },
   memberOption: {
     minHeight: 32,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.light.separator,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.light.separator + "77",
     backgroundColor: Colors.light.background,
     flexDirection: "row",
     alignItems: "center",
@@ -3527,7 +4142,7 @@ const styles = StyleSheet.create({
   memberOptionAvatar: {
     width: 22,
     height: 22,
-    borderRadius: 8,
+    borderRadius: 11,
     backgroundColor: Colors.light.backgroundTertiary,
   },
   memberOptionName: {
@@ -3548,8 +4163,8 @@ const styles = StyleSheet.create({
   currentLocationBtn: {
     width: 40,
     height: 40,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.light.separator,
     backgroundColor: Colors.light.backgroundSecondary,
     alignItems: "center",
@@ -3566,8 +4181,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     backgroundColor: partyAccentSoft,
-    borderRadius: 10,
-    borderWidth: 1,
+    borderRadius: Colors.shape.radiusMd,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: partyAccent + "55",
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -3586,9 +4201,9 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   partyDropdown: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.light.separator,
+    borderRadius: Colors.shape.radiusMd,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.light.separator + "77",
     backgroundColor: Colors.light.background,
     overflow: "hidden",
   },
@@ -3624,9 +4239,9 @@ const styles = StyleSheet.create({
   },
   partyCreateButton: {
     height: 38,
-    borderRadius: 8,
+    borderRadius: 19,
     backgroundColor: partyAccent,
-    borderWidth: Colors.shape.borderWidthThin,
+    borderWidth: 0,
     borderColor: mapPanelBorder,
     alignItems: "center",
     justifyContent: "center",
