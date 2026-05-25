@@ -35,6 +35,8 @@ const ONLINE_STALE_MINUTES = 20;
 const LIVE_POI_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_POI_RADIUS_METERS = 1800;
 const LIVE_POI_LIMIT = 180;
+const DEV_SIMULATED_STRANGER_COUNT = 50;
+const DEV_SIMULATED_FRIEND_COUNT = 10;
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 
 // Mock seed parties (relative to home location)
@@ -84,6 +86,7 @@ type MapUser = {
   id: string;
   avatarUrl?: string;
   intent: "active" | "friend" | "relationship";
+  isFriend?: boolean;
 };
 
 type LivePoiCategory = "transit" | "school" | "worship" | "food" | "shop" | "green";
@@ -124,6 +127,8 @@ function areMapUsersEqual(a: MapUser[], b: MapUser[]): boolean {
       x.id !== y.id ||
       x.name !== y.name ||
       x.intent !== y.intent ||
+      x.avatarUrl !== y.avatarUrl ||
+      x.isFriend !== y.isFriend ||
       Math.abs(x.lat - y.lat) > 0.000001 ||
       Math.abs(x.lng - y.lng) > 0.000001
     ) {
@@ -378,6 +383,42 @@ function toLivePoi(element: OverpassElement): LivePoi | null {
   };
 }
 
+function buildFallbackLivePois(homeLocation: { lat: number; lng: number }): LivePoi[] {
+  const seed: Array<Omit<LivePoi, "lat" | "lng"> & { dLat: number; dLng: number }> = [
+    { id: "fallback-park", name: "Pocket Park", category: "green", poiType: "park", dLat: 0.0018, dLng: -0.0012 },
+    { id: "fallback-bus", name: "Market Stop", category: "transit", poiType: "bus_stop", dLat: 0.0011, dLng: 0.0017 },
+    { id: "fallback-cafe", name: "Neon Coffee", category: "food", poiType: "cafe", dLat: 0.00035, dLng: -0.00018 },
+    { id: "fallback-restaurant", name: "Corner Kitchen", category: "food", poiType: "restaurant", dLat: 0.00036, dLng: -0.00015 },
+    { id: "fallback-burger", name: "Late Burger", category: "food", poiType: "fast_food", dLat: 0.00032, dLng: -0.00012 },
+    { id: "fallback-market", name: "Local Market", category: "shop", poiType: "supermarket", dLat: 0.00028, dLng: -0.0002 },
+    { id: "fallback-kiosk", name: "Night Kiosk", category: "shop", poiType: "convenience", dLat: 0.00029, dLng: -0.00016 },
+    { id: "fallback-bakery", name: "Morning Bakery", category: "shop", poiType: "bakery", dLat: 0.00031, dLng: -0.00024 },
+    { id: "fallback-books", name: "Tiny Books", category: "shop", poiType: "books", dLat: 0.00022, dLng: -0.00014 },
+    { id: "fallback-pharmacy", name: "City Pharmacy", category: "shop", poiType: "pharmacy", dLat: -0.00038, dLng: 0.0002 },
+    { id: "fallback-school", name: "Local School", category: "school", poiType: "school", dLat: -0.0015, dLng: 0.001 },
+    { id: "fallback-worship", name: "Neighborhood Church", category: "worship", poiType: "place_of_worship", dLat: -0.0011, dLng: -0.0016 },
+  ];
+
+  return seed
+    .map((poi) => ({
+      id: poi.id,
+      lat: homeLocation.lat + poi.dLat,
+      lng: homeLocation.lng + poi.dLng,
+      name: poi.name,
+      category: poi.category,
+      poiType: poi.poiType,
+    }))
+    .sort((a, b) => `${a.category}|${a.name}|${a.id}`.localeCompare(`${b.category}|${b.name}|${b.id}`));
+}
+
+function applyFallbackLivePois(
+  setLivePois: React.Dispatch<React.SetStateAction<LivePoi[]>>,
+  homeLocation: { lat: number; lng: number },
+) {
+  const fallbackPois = buildFallbackLivePois(homeLocation);
+  setLivePois((prev) => (prev.length ? prev : fallbackPois));
+}
+
 function buildMapHtml(
   lat: number,
   lng: number,
@@ -429,28 +470,23 @@ function buildMapHtml(
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: var(--paper); font-family: "Avenir Next", "Trebuchet MS", "Arial Rounded MT Bold", sans-serif; overflow: hidden; }
     #map { width: 100vw; height: 100vh; }
-    #parchment-overlay {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 330;
-      background:
-        linear-gradient(rgba(0, 240, 255, 0.08) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 240, 255, 0.07) 1px, transparent 1px),
-        radial-gradient(circle at 12% 16%, ${mapStyle.overlayBlue} 0%, rgba(0, 240, 255, 0) 32%),
-        radial-gradient(circle at 84% 80%, ${mapStyle.overlayPink} 0%, rgba(255, 43, 214, 0) 36%),
-        radial-gradient(circle at 52% 42%, ${mapStyle.overlayYellow} 0%, rgba(239, 255, 58, 0) 38%);
-      background-size: 34px 34px, 34px 34px, auto, auto, auto;
-      mix-blend-mode: screen;
-    }
+	    #parchment-overlay {
+	      position: fixed;
+	      inset: 0;
+	      pointer-events: none;
+	      z-index: 330;
+	      background:
+	        radial-gradient(circle at 12% 16%, ${mapStyle.overlayBlue} 0%, rgba(0, 240, 255, 0) 32%),
+	        radial-gradient(circle at 84% 80%, ${mapStyle.overlayPink} 0%, rgba(255, 43, 214, 0) 36%),
+	        radial-gradient(circle at 52% 42%, ${mapStyle.overlayYellow} 0%, rgba(239, 255, 58, 0) 38%);
+	      mix-blend-mode: screen;
+	    }
     #vignette {
       position: fixed;
       inset: 0;
       pointer-events: none;
       z-index: 360;
-      box-shadow:
-        inset 0 0 90px rgba(0, 240, 255, 0.16),
-        inset 0 0 180px rgba(0, 0, 0, 0.62);
+	      box-shadow: inset 0 0 90px rgba(0, 0, 0, 0.46);
     }
     #recenter {
       position: fixed;
@@ -489,9 +525,9 @@ function buildMapHtml(
       color: var(--accent-pink);
       font-size: 13px;
     }
-    .maplibregl-canvas {
-      filter: saturate(1.75) contrast(1.2) hue-rotate(-9deg) brightness(0.82);
-    }
+	    .maplibregl-canvas {
+	      filter: saturate(1.25) contrast(1.06) brightness(0.9);
+	    }
     #dev-3d {
       position: fixed;
       right: 16px;
@@ -514,29 +550,76 @@ function buildMapHtml(
       transform: translateY(2px);
       box-shadow: 0 1px 0 rgba(21, 34, 56, 0.32);
     }
-    .pulse { animation: pulse 2s infinite; }
-    @keyframes pulse {
-      0%   { transform: scale(1);   opacity: 1; }
-      50%  { transform: scale(1.35); opacity: 0.65; }
-      100% { transform: scale(1);   opacity: 1; }
-    }
-    .party-pulse { animation: partyPulse 2.4s infinite; }
-    @keyframes partyPulse {
-      0%   { box-shadow: 0 0 0 0 ${PARTY_COLORS.shadow}; }
-      60%  { box-shadow: 0 0 0 13px rgba(255,43,214,0); }
-      100% { box-shadow: 0 0 0 0 rgba(255,43,214,0); }
-    }
+	    .pulse { animation: pulse 2s infinite; }
+	    @keyframes pulse {
+	      0%   { opacity: 1; }
+	      50%  { opacity: 0.68; }
+	      100% { opacity: 1; }
+	    }
+    .party-pulse { animation: partyPulse 1.9s infinite; }
+	    @keyframes partyPulse {
+	      0%   { box-shadow: 0 0 0 0 rgba(255,43,214,0.9), 0 0 16px rgba(255,43,214,0.55); }
+	      45%  { box-shadow: 0 0 0 14px rgba(255,43,214,0.34), 0 0 22px rgba(255,43,214,0.48); }
+	      80%  { box-shadow: 0 0 0 25px rgba(255,43,214,0), 0 0 30px rgba(255,43,214,0.28); }
+	      100% { box-shadow: 0 0 0 0 rgba(255,43,214,0), 0 0 16px rgba(255,43,214,0.45); }
+	    }
+	    .friend-pulse { animation: friendPulse 1.9s infinite; }
+	    @keyframes friendPulse {
+	      0%   { box-shadow: 0 0 0 0 rgba(239,255,58,0.92), 0 0 14px rgba(239,255,58,0.54); }
+	      45%  { box-shadow: 0 0 0 13px rgba(239,255,58,0.36), 0 0 22px rgba(239,255,58,0.48); }
+	      80%  { box-shadow: 0 0 0 24px rgba(239,255,58,0), 0 0 30px rgba(239,255,58,0.26); }
+	      100% { box-shadow: 0 0 0 0 rgba(239,255,58,0), 0 0 14px rgba(239,255,58,0.42); }
+	    }
     .popup { font-size: 13px; min-width: 130px; }
     .popup a  { display: block; color: var(--ink); font-weight: 800; cursor: pointer; text-decoration: none; }
-    .popup a:active { color: var(--accent); }
-    .popup strong { display: block; color: var(--ink); font-weight: 900; font-size: 14px; }
-    .popup span { color: var(--accent-blue); font-size: 11px; margin-top: 2px; display: block; font-weight: 700; }
-    .friend-name-tag {
-      padding: 2px 8px;
+	    .popup a:active { color: var(--accent); }
+	    .popup strong { display: block; color: var(--ink); font-weight: 900; font-size: 14px; }
+	    .popup span { color: var(--accent-blue); font-size: 11px; margin-top: 2px; display: block; font-weight: 700; }
+	    .poi-anchor {
+	      position: relative;
+	      width: 0;
+	      height: 0;
+	      overflow: visible;
+	    }
+	    .poi-connector {
+	      position: absolute;
+	      left: 0;
+	      top: -1px;
+	      height: 2px;
+	      border-radius: 999px;
+	      background: linear-gradient(90deg, rgba(0,240,255,0.72), rgba(255,43,214,0.48));
+		      opacity: 0.78;
+	      transform-origin: 0 50%;
+	      pointer-events: none;
+	    }
+	    .poi-origin-dot {
+	      position: absolute;
+	      left: -4px;
+	      top: -4px;
+	      width: 8px;
+	      height: 8px;
+	      border-radius: 999px;
+	      border: 1px solid rgba(0,240,255,0.92);
+	      background: rgba(7,19,31,0.88);
+		      box-shadow: 0 0 5px rgba(0,240,255,0.48);
+	      pointer-events: none;
+	    }
+	    .poi-badge {
+	      position: absolute;
+	      left: 0;
+	      top: 0;
+	      display: flex;
+	      align-items: center;
+	      justify-content: center;
+	      pointer-events: auto;
+		      will-change: transform;
+	    }
+	    .friend-name-tag {
+	      padding: 2px 8px;
       border-radius: var(--marker-radius);
       border: 1px solid var(--accent-blue);
       background: rgba(7, 19, 31, 0.92);
-      box-shadow: 0 0 12px rgba(0,240,255,0.32);
+	      box-shadow: 0 0 6px rgba(0,240,255,0.24);
       color: var(--ink);
       font-size: 11px;
       font-weight: 900;
@@ -639,7 +722,7 @@ function buildMapHtml(
       postNativeMessage({ type: 'map_error', message: reason });
     };
 
-    var initialZoom = 15;
+    var initialZoom = 14;
     var baseStyle = {
       version: 8,
       sprite: 'https://tiles.openfreemap.org/sprites/ofm_f384/ofm',
@@ -661,16 +744,19 @@ function buildMapHtml(
       ]
     };
     var markerRefs = [];
+    var poiMarkerEntries = [];
+    var poiVisibilityRaf = null;
 
-    var map = new maplibregl.Map({
-      container: 'map',
-      style: baseStyle,
-      center: [${lng}, ${lat}],
-      zoom: initialZoom,
-      pitch: 0,
-      maxPitch: 60,
-      attributionControl: false
-    });
+	    var map = new maplibregl.Map({
+	      container: 'map',
+	      style: baseStyle,
+	      center: [${lng}, ${lat}],
+	      zoom: initialZoom,
+	      pitch: 0,
+	      maxPitch: 60,
+	      fadeDuration: 0,
+	      attributionControl: false
+	    });
     map.dragRotate.disable();
     map.touchZoomRotate.disableRotation();
     map.touchPitch.enable();
@@ -694,8 +780,8 @@ function buildMapHtml(
       dev3dButton.addEventListener('click', function(event) {
         event.preventDefault();
         event.stopPropagation();
-        var isIn3D = map.getPitch() > 10;
-        dev3dButton.textContent = isIn3D ? '3D' : '2D';
+	        var isIn3D = map.getPitch() > 10;
+	        dev3dButton.textContent = isIn3D ? '3D' : '2D';
         dev3dButton.setAttribute('aria-label', isIn3D ? '3D Ansicht' : '2D Ansicht');
         map.easeTo({
           center: map.getCenter(),
@@ -705,11 +791,11 @@ function buildMapHtml(
           duration: 480
         });
       });
-      map.on('pitchend', function() {
-        var isIn3D = map.getPitch() > 10;
-        dev3dButton.textContent = isIn3D ? '2D' : '3D';
-        dev3dButton.setAttribute('aria-label', isIn3D ? '2D Ansicht' : '3D Ansicht');
-      });
+	      map.on('pitchend', function() {
+	        var isIn3D = map.getPitch() > 10;
+	        dev3dButton.textContent = isIn3D ? '2D' : '3D';
+	        dev3dButton.setAttribute('aria-label', isIn3D ? '2D Ansicht' : '3D Ansicht');
+	      });
     }
 
     function clearMarkers() {
@@ -717,11 +803,119 @@ function buildMapHtml(
         try { marker.remove(); } catch (_) {}
       });
       markerRefs = [];
+      poiMarkerEntries = [];
+      if (poiVisibilityRaf) {
+        window.cancelAnimationFrame(poiVisibilityRaf);
+        poiVisibilityRaf = null;
+      }
     }
 
     function pushMarker(marker) {
       markerRefs.push(marker);
       return marker;
+    }
+
+    function poiCategoryPriority(poi, visual) {
+      var categoryRank = {
+        green: 90,
+        transit: 82,
+        school: 76,
+        worship: 70,
+        food: 54,
+        shop: 42
+      };
+      var rank = categoryRank[poi.category] || 40;
+      var type = String((poi && poi.poiType) || '').toLowerCase();
+      if (type === 'restaurant' || type === 'cafe' || type === 'bar') rank += 8;
+      if (type === 'supermarket' || type === 'pharmacy') rank += 7;
+      if (visual && visual.subtitle && visual.subtitle !== 'Shop') rank += 3;
+      return rank;
+    }
+
+    function poiOffsetStrengthForZoom(zoom) {
+      if (zoom >= 18.2) return 0;
+      if (zoom <= 14.6) return 1;
+      return Math.max(0, Math.min(1, (18.2 - zoom) / 3.6));
+    }
+
+    function poiClusterKey(poi) {
+      var cellSize = 0.00115;
+      return [
+        Math.round(poi.lat / cellSize),
+        Math.round(poi.lng / cellSize)
+      ].join('|');
+    }
+
+    function poiOffsetForSlot(index, clusterSize, strength) {
+      if (clusterSize <= 1 || strength <= 0.01) return { dx: 0, dy: 0 };
+      var columns = Math.min(5, clusterSize);
+      var col = index % columns;
+      var row = Math.floor(index / columns);
+      var gapX = 48;
+      var gapY = 50;
+      var centeredCol = col - ((columns - 1) / 2);
+      return {
+        dx: centeredCol * gapX * strength,
+        dy: (-58 - row * gapY) * strength
+      };
+    }
+
+    function applyPoiOffset(entry, dx, dy, zoom) {
+      var badge = entry.badge || entry.element.__poiBadge;
+      var connector = entry.connector || entry.element.__poiConnector;
+      var originDot = entry.originDot || entry.element.__poiOriginDot;
+      var size = entry.size || entry.element.__poiSize || 28;
+      if (!badge || !connector) return;
+
+      badge.style.transform = 'translate(' + (dx - size / 2) + 'px,' + (dy - size / 2) + 'px)';
+      badge.style.opacity = zoom < 15.4 ? '0.94' : '1';
+
+      var distance = Math.hypot(dx, dy);
+      if (distance < 8) {
+        connector.style.display = 'none';
+        if (originDot) originDot.style.display = 'none';
+        return;
+      }
+      if (originDot) originDot.style.display = 'block';
+      connector.style.display = 'block';
+      connector.style.width = distance + 'px';
+      connector.style.opacity = String(Math.min(0.82, Math.max(0.25, distance / 120)));
+      connector.style.transform = 'rotate(' + Math.atan2(dy, dx) + 'rad)';
+    }
+
+    function updatePoiMarkerVisibility() {
+      if (!poiMarkerEntries.length) return;
+      var zoom = map.getZoom();
+      var offsetStrength = poiOffsetStrengthForZoom(zoom);
+      var container = map.getContainer();
+      var width = container ? container.clientWidth : 0;
+      var height = container ? container.clientHeight : 0;
+
+      poiMarkerEntries.forEach(function(entry) {
+        var point = map.project([entry.poi.lng, entry.poi.lat]);
+        var margin = 42;
+        var visibleOnScreen =
+          point.x >= -margin * 3 &&
+          point.y >= -margin * 3 &&
+          point.x <= width + margin * 3 &&
+          point.y <= height + margin * 3;
+        if (!visibleOnScreen) {
+          entry.element.style.display = 'none';
+          return;
+        }
+        var selected = poiOffsetForSlot(entry.offsetIndex, entry.clusterSize || 1, offsetStrength);
+        entry.element.style.display = 'block';
+        entry.element.style.opacity = '1';
+        applyPoiOffset(entry, selected.dx, selected.dy, zoom);
+      });
+    }
+
+    function schedulePoiMarkerVisibilityUpdate() {
+      if (poiVisibilityRaf) window.cancelAnimationFrame(poiVisibilityRaf);
+      poiVisibilityRaf = window.requestAnimationFrame(function() {
+        poiVisibilityRaf = null;
+        updatePoiMarkerVisibility();
+      });
     }
 
     function resolveVectorSourceName() {
@@ -1035,15 +1229,15 @@ function buildMapHtml(
           return;
         }
 
-        if (!map.getLayer('locals-3d-buildings')) {
-          map.addLayer(
-            {
-              id: 'locals-3d-buildings',
-              type: 'fill-extrusion',
-              source: sourceName,
-              'source-layer': 'building',
-              minzoom: 13,
-              paint: {
+	        if (!map.getLayer('locals-3d-buildings')) {
+	          map.addLayer(
+	            {
+	              id: 'locals-3d-buildings',
+	              type: 'fill-extrusion',
+	              source: sourceName,
+	              'source-layer': 'building',
+	              minzoom: 13,
+	              paint: {
                 'fill-extrusion-color': extrusionColor,
                 'fill-extrusion-height': extrusionHeight,
                 'fill-extrusion-base': extrusionBase,
@@ -1157,6 +1351,34 @@ function buildMapHtml(
       ].join(';');
       if (innerHtml) el.innerHTML = innerHtml;
       return el;
+    }
+
+    function poiMarkerEl(size, background, border, shadow, innerHtml) {
+      var root = document.createElement('div');
+      root.className = 'poi-anchor';
+      var connector = document.createElement('div');
+      connector.className = 'poi-connector';
+      var originDot = document.createElement('div');
+      originDot.className = 'poi-origin-dot';
+      var badge = document.createElement('div');
+      badge.className = 'poi-badge';
+      badge.style.cssText = [
+        'width:' + size + 'px',
+        'height:' + size + 'px',
+        'border-radius:var(--marker-radius)',
+        'background:' + background,
+        'border:' + border,
+        'box-shadow:' + shadow
+      ].join(';');
+      if (innerHtml) badge.innerHTML = innerHtml;
+      root.appendChild(originDot);
+      root.appendChild(connector);
+      root.appendChild(badge);
+      root.__poiBadge = badge;
+      root.__poiConnector = connector;
+      root.__poiOriginDot = originDot;
+      root.__poiSize = size;
+      return root;
     }
 
     function addLivePoiMarkers() {
@@ -1283,26 +1505,68 @@ function buildMapHtml(
         };
       }
 
-      pois.forEach(function(poi) {
+      var validPois = pois
+        .filter(function(poi) {
+          return typeof poi.lat === 'number' && typeof poi.lng === 'number';
+        })
+        .sort(function(a, b) {
+          return String(a.category + '|' + a.name + '|' + a.id)
+            .localeCompare(String(b.category + '|' + b.name + '|' + b.id));
+        });
+      var poiClusters = {};
+      validPois.forEach(function(poi) {
+        var key = poiClusterKey(poi);
+        if (!poiClusters[key]) poiClusters[key] = [];
+        poiClusters[key].push(poi);
+      });
+      Object.keys(poiClusters).forEach(function(key) {
+        poiClusters[key]
+          .sort(function(a, b) {
+            return String(a.category + '|' + a.name + '|' + a.id)
+              .localeCompare(String(b.category + '|' + b.name + '|' + b.id));
+          })
+          .forEach(function(poi, index) {
+            poi.__offsetIndex = index;
+            poi.__clusterSize = poiClusters[key].length;
+          });
+      });
+
+      validPois.forEach(function(poi) {
         if (typeof poi.lat !== 'number' || typeof poi.lng !== 'number') return;
         var base = styles[poi.category] || styles.shop;
         var category = resolvePoiVisual(poi, base);
-        var poiEl = markerEl(
+        var stableKey = String(poi.category + '|' + poi.name + '|' + poi.id);
+        var poiEl = poiMarkerEl(
           28,
-          category.bg,
+          'linear-gradient(135deg, rgba(0,0,0,0.96) 0%, rgba(6,10,16,0.98) 100%)',
           category.border,
-          category.shadow,
+          category.shadow + ', 0 0 0 1px rgba(0,0,0,0.92) inset',
           '<span style="font-size:15px; line-height:1;">' + category.icon + '</span>'
         );
         poiEl.style.cursor = 'pointer';
 
-        pushMarker(new maplibregl.Marker({ element: poiEl, anchor: 'center' })
+        var poiMarker = pushMarker(new maplibregl.Marker({ element: poiEl, anchor: 'center', pitchAlignment: 'viewport', rotationAlignment: 'viewport' })
           .setLngLat([poi.lng, poi.lat])
           .setPopup(new maplibregl.Popup({ closeButton: false, offset: 10 }).setHTML(
             infoSheetHtml(poi.name || 'POI', category.subtitle, category.icon)
           ))
           .addTo(map));
+        poiMarkerEntries.push({
+          marker: poiMarker,
+          element: poiEl,
+          badge: poiEl.__poiBadge,
+          connector: poiEl.__poiConnector,
+          originDot: poiEl.__poiOriginDot,
+          size: poiEl.__poiSize,
+          poi: poi,
+          offsetIndex: poi.__offsetIndex || 0,
+          clusterSize: poi.__clusterSize || 1,
+          stableKey: stableKey,
+          priority: poiCategoryPriority(poi, category)
+        });
       });
+      schedulePoiMarkerVisibilityUpdate();
+      window.setTimeout(schedulePoiMarkerVisibilityUpdate, 120);
     }
 
     function addPartyAndMemberMarkers() {
@@ -1417,6 +1681,8 @@ function buildMapHtml(
     function addUserMarkers() {
       var users = ${usersJson};
       var currentFilter = ${filterModeJson};
+      var neonYellow = '#efff3a';
+      var neonGreen = '#00ffb2';
 
       users.forEach(function(u) {
         var showDatingMarker = currentFilter === 'dating' && u.intent !== 'active';
@@ -1434,15 +1700,15 @@ function buildMapHtml(
             '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + heartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
           );
         } else if (showFriendMarker) {
-          var bubble = markerEl(
-            28,
-            'linear-gradient(135deg,rgba(0,255,178,0.2) 0%,rgba(0,240,255,0.18) 100%)',
-            '1px solid var(--mint)',
-            '0 0 14px rgba(0,255,178,0.38)',
-            '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="#00ffb2"/><circle cx="16" cy="8" r="3.2" fill="#00f0ff"/><path fill="#00ffb2" d="M2.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9H3.6c-.5 0-.9-.4-.8-.9z"/><path fill="#00f0ff" d="M10.8 19.4c.6-3.6 2.8-5.7 5.2-5.7s4.6 2.1 5.2 5.7c.1.5-.3.9-.8.9h-8.8c-.5 0-.9-.4-.8-.9z"/></svg>'
-          );
-          var wrap = document.createElement('div');
-          wrap.className = 'friend-marker-wrap pulse';
+	          var bubble = markerEl(
+            22,
+            neonYellow,
+            '2px solid rgba(234,251,255,0.92)',
+	            '0 0 10px rgba(239,255,58,0.44)'
+	          );
+	          bubble.className = 'friend-pulse';
+	          var wrap = document.createElement('div');
+          wrap.className = 'friend-marker-wrap';
           var label = document.createElement('div');
           label.className = 'friend-name-tag';
           label.textContent = u.name || 'Freund';
@@ -1450,14 +1716,21 @@ function buildMapHtml(
           wrap.appendChild(bubble);
           el = wrap;
         } else {
-          el = markerEl(
-            15,
-            'linear-gradient(135deg, var(--mint) 0%, var(--accent-blue) 100%)',
+          var isFriend = !!u.isFriend;
+          var circleSize = isFriend ? 22 : 13;
+          var circleColor = isFriend ? neonYellow : neonGreen;
+          var circleGlow = isFriend ? 'rgba(239,255,58,0.44)' : 'rgba(0,255,178,0.38)';
+	          el = markerEl(
+            circleSize,
+            circleColor,
             '1px solid rgba(234,251,255,0.9)',
-            '0 0 12px rgba(0,255,178,0.42)'
-          );
-        }
-        if (!showFriendMarker) {
+	            '0 0 10px ' + circleGlow
+	          );
+	          if (isFriend) {
+	            el.className = 'friend-pulse';
+	          }
+	        }
+        if (showDatingMarker) {
           el.className = 'pulse';
         }
 
@@ -1504,42 +1777,40 @@ function buildMapHtml(
         var meHeartColor = myPresence === 'relationship' ? '#ff3864' : '#00ffb2';
         var meHeartBackground = myPresence === 'relationship' ? 'rgba(255,56,100,0.22)' : 'rgba(0,255,178,0.18)';
         mePopupText = myPresence === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde';
-        meEl = markerEl(
-          30,
-          'linear-gradient(135deg,rgba(7,19,31,0.96) 0%,' + meHeartBackground + ' 100%)',
-          '1px solid ' + meHeartColor,
-          '0 0 16px ' + meHeartBackground,
-          '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + meHeartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
-        );
-      } else {
-        meEl = markerEl(
-          19,
-          'linear-gradient(135deg, #ff3864 0%, #ff2bd6 100%)',
-          '1px solid var(--ink)',
-          '0 0 16px rgba(255,56,100,0.48)'
-        );
+	        meEl = markerEl(
+	          42,
+	          'linear-gradient(135deg,rgba(7,19,31,0.96) 0%,' + meHeartBackground + ' 100%)',
+	          '2px solid ' + meHeartColor,
+	          '0 0 18px ' + meHeartBackground,
+	          '<svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + meHeartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
+	        );
+	      } else {
+	        meEl = markerEl(
+	          42,
+	          '#efff3a',
+	          '2px solid rgba(234,251,255,0.96)',
+	          '0 0 18px rgba(239,255,58,0.54)'
+	        );
       }
 
-      meEl.className = 'pulse';
+	      meEl.style.zIndex = '90';
 
-      var meMarker = pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
+	      var meMarker = pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
         .setLngLat([${lng}, ${lat}])
         .setPopup(new maplibregl.Popup({ closeButton: false, offset: 11 }).setHTML(
           infoSheetHtml('Du', mePopupText, '📍')
         ))
         .addTo(map));
-
-      meMarker.togglePopup();
-    }
+	    }
 
     function renderMapLayersAndMarkers() {
-      clearMarkers();
-      var currentFilter = ${filterModeJson};
-      var peopleOnly = currentFilter === 'people';
+	      clearMarkers();
+	      var currentFilter = ${filterModeJson};
+	      var hidePois = currentFilter === 'people' || currentFilter === 'friends' || currentFilter === 'dating';
 
-      addStyledBuildings();
-      add3DBuildings();
-      if (!peopleOnly) addLivePoiMarkers();
+	      addStyledBuildings();
+	      add3DBuildings();
+	      if (!hidePois) addLivePoiMarkers();
       addPartyAndMemberMarkers();
       addUserMarkers();
       addMyMarker();
@@ -1547,7 +1818,12 @@ function buildMapHtml(
 
     map.on('style.load', function() {
       renderMapLayersAndMarkers();
+      map.once('idle', schedulePoiMarkerVisibilityUpdate);
     });
+
+    map.on('zoomend', schedulePoiMarkerVisibilityUpdate);
+    map.on('pitchend', schedulePoiMarkerVisibilityUpdate);
+    map.on('resize', schedulePoiMarkerVisibilityUpdate);
 
     map.on('error', function(errorEvent) {
       var msg = errorEvent && errorEvent.error && errorEvent.error.message
@@ -1818,6 +2094,7 @@ out center tags ${LIVE_POI_LIMIT};`;
 
       if (!response.ok) {
         console.warn("live poi fetch failed", response.status);
+        applyFallbackLivePois(setLivePois, homeLocation);
         return;
       }
 
@@ -1841,9 +2118,14 @@ out center tags ${LIVE_POI_LIMIT};`;
         .sort((a, b) =>
           `${a.category}|${a.name}|${a.id}`.localeCompare(`${b.category}|${b.name}|${b.id}`),
         );
+      if (!next.length) {
+        applyFallbackLivePois(setLivePois, homeLocation);
+        return;
+      }
       setLivePois((prev) => (areLivePoisEqual(prev, next) ? prev : next));
     } catch (error) {
       console.warn("live poi fetch exception", error);
+      applyFallbackLivePois(setLivePois, homeLocation);
     }
   }, [homeLocation]);
 
@@ -1942,15 +2224,50 @@ out center tags ${LIVE_POI_LIMIT};`;
     return [...mockParties, ...userParties];
   }, [homeLocation, allUsers, storedParties, currentUser.id]);
 
+	  const simulatedUsers = useMemo<MapUser[]>(() => {
+	    if (!__DEV__ || !homeLocation) return [];
+	    const total = DEV_SIMULATED_STRANGER_COUNT + DEV_SIMULATED_FRIEND_COUNT;
+	    return Array.from({ length: total }, (_, index) => {
+	      const isFriend = index < DEV_SIMULATED_FRIEND_COUNT;
+	      const localIndex = isFriend ? index : index - DEV_SIMULATED_FRIEND_COUNT;
+	      const ring = Math.floor(localIndex / 10);
+	      const angle =
+	        (localIndex / (isFriend ? DEV_SIMULATED_FRIEND_COUNT : DEV_SIMULATED_STRANGER_COUNT)) *
+	          Math.PI *
+	          2 +
+	        ring * 0.57 +
+	        (isFriend ? 0.22 : 0);
+	      const radius = isFriend
+	        ? 0.0032 + (index % 4) * 0.0011
+	        : 0.0038 + ring * 0.00105 + (localIndex % 6) * 0.00042;
+	      return {
+        id: isFriend ? `sim-friend-${index + 1}` : `sim-local-${index - DEV_SIMULATED_FRIEND_COUNT + 1}`,
+        name: isFriend ? `Freund ${index + 1}` : `Local ${index - DEV_SIMULATED_FRIEND_COUNT + 1}`,
+        lat: homeLocation.lat + Math.sin(angle) * radius,
+        lng: homeLocation.lng + Math.cos(angle) * radius,
+        intent: "active",
+        isFriend,
+      };
+    });
+  }, [homeLocation]);
+
+  const mapUsers = useMemo(
+    () => [
+      ...activeUsers.map((user) => ({ ...user, isFriend: friendIds.has(user.id) })),
+      ...simulatedUsers,
+    ],
+    [activeUsers, friendIds, simulatedUsers],
+  );
+
   const visibleUsers = useMemo(() => {
     if (filterMode === "friends") {
-      return activeUsers.filter((u) => friendIds.has(u.id));
+      return mapUsers.filter((u) => u.isFriend);
     }
     if (filterMode === "dating") {
-      return activeUsers.filter((u) => u.intent !== "active");
+      return mapUsers.filter((u) => u.intent !== "active");
     }
-    return activeUsers;
-  }, [activeUsers, filterMode, friendIds]);
+    return mapUsers;
+  }, [filterMode, mapUsers]);
 
   const visibleParties = useMemo(() => allParties, [allParties]);
 
@@ -2043,8 +2360,8 @@ out center tags ${LIVE_POI_LIMIT};`;
     );
   }
 
-  const datingCount = activeUsers.filter((u) => u.intent !== "active").length;
-  const friendsCount = activeUsers.filter((u) => friendIds.has(u.id)).length;
+  const datingCount = mapUsers.filter((u) => u.intent !== "active").length;
+  const friendsCount = mapUsers.filter((u) => u.isFriend).length;
   const selectedFilter =
     FILTER_OPTIONS.find((option) => option.mode === filterMode) ??
     FILTER_OPTIONS[0];
@@ -2188,7 +2505,7 @@ out center tags ${LIVE_POI_LIMIT};`;
                   ? datingCount
                   : option.mode === "friends"
                     ? friendsCount
-                    : activeUsers.length;
+                    : mapUsers.length;
               return (
                 <Pressable
                   key={option.mode}

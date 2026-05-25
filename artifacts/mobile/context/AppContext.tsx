@@ -284,6 +284,7 @@ type AppContextType = {
   addComment: (postId: string, content: string) => void;
   getCommentsForPost: (postId: string) => Comment[];
   getPostById: (postId: string) => Post | undefined;
+  updateProfileLocation: (locationName: string) => Promise<void>;
   createParty: (name: string, lat: number, lng: number, members: PartyMember[]) => void;
 };
 
@@ -780,6 +781,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [currentUser]
   );
 
+  const updateProfileLocation = useCallback(
+    async (locationName: string) => {
+      const nextLocation = locationName.trim();
+      if (!nextLocation) return;
+
+      setCurrentUser((prev) => ({ ...prev, location: nextLocation }));
+
+      if (user) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ home_location_name: nextLocation })
+          .eq("id", user.id);
+        if (error) {
+          console.warn("profile location update failed", error.message);
+        }
+      }
+    },
+    [user],
+  );
+
   const value = useMemo<AppContextType>(
     () => ({
       currentUser,
@@ -794,6 +815,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addComment,
       getCommentsForPost,
       getPostById,
+      updateProfileLocation,
       createParty,
     }),
     [
@@ -809,6 +831,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addComment,
       getCommentsForPost,
       getPostById,
+      updateProfileLocation,
       createParty,
     ],
   );

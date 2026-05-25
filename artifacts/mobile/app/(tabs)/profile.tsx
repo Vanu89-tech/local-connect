@@ -1,13 +1,19 @@
 import { Feather } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { router } from "expo-router";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PostCard } from "@/components/PostCard";
 import Colors from "@/constants/colors";
 import { Post, useApp } from "@/context/AppContext";
+import { useLocation } from "@/context/LocationContext";
 
 function StatPill({ value, label }: { value: number; label: string }) {
   return (
@@ -26,13 +33,65 @@ function StatPill({ value, label }: { value: number; label: string }) {
 }
 
 export default function ProfileScreen() {
-  const { currentUser, posts } = useApp();
+  const { currentUser, posts, updateProfileLocation } = useApp();
+  const { homeLocation, setHomeLocation, refreshLocation } = useLocation();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const [editOpen, setEditOpen] = useState(false);
+  const [addressInput, setAddressInput] = useState(homeLocation?.address ?? "");
+  const [savingAddress, setSavingAddress] = useState(false);
 
   const myPosts = posts.filter((p) => p.userId === currentUser.id);
 
   const renderItem = ({ item }: { item: Post }) => <PostCard post={item} />;
+
+  useEffect(() => {
+    if (!editOpen) {
+      setAddressInput(homeLocation?.address ?? "");
+    }
+  }, [editOpen, homeLocation?.address]);
+
+  const saveAddress = async () => {
+    const address = addressInput.trim();
+    if (!address) {
+      Alert.alert("Adresse fehlt", "Gib deine Adresse ein, damit Locals deinen Heimbereich setzen kann.");
+      return;
+    }
+
+    setSavingAddress(true);
+    try {
+      const results = await Location.geocodeAsync(address);
+      const first = results[0];
+      if (!first) {
+        Alert.alert("Nicht gefunden", "Versuche es mit Straße, Hausnummer und Stadt.");
+        return;
+      }
+
+      const reverse = await Location.reverseGeocodeAsync({
+        latitude: first.latitude,
+        longitude: first.longitude,
+      });
+      const place = reverse[0];
+      const name = [place?.district || place?.subregion, place?.city]
+        .filter(Boolean)
+        .join(", ") || place?.city || "Daheim";
+
+      await setHomeLocation({
+        name,
+        address,
+        lat: first.latitude,
+        lng: first.longitude,
+      });
+      await updateProfileLocation(name);
+      await refreshLocation();
+      setEditOpen(false);
+    } catch (error) {
+      console.warn("profile address save failed", error);
+      Alert.alert("Adresse konnte nicht gespeichert werden", "Prüfe die Adresse und versuche es nochmal.");
+    } finally {
+      setSavingAddress(false);
+    }
+  };
 
   const ListHeader = () => (
     <View>
@@ -63,6 +122,7 @@ export default function ProfileScreen() {
         <View style={styles.profileActions}>
           <Pressable
             style={({ pressed }) => [styles.editBtn, { opacity: pressed ? 0.8 : 1 }]}
+            onPress={() => setEditOpen(true)}
           >
             <Text style={styles.editBtnText}>Edit Profile</Text>
           </Pressable>
@@ -108,6 +168,57 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
         scrollEnabled={!!myPosts.length}
       />
+      <Modal
+        visible={editOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.editSheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Profil bearbeiten</Text>
+              <Pressable style={styles.closeButton} onPress={() => setEditOpen(false)}>
+                <Feather name="x" size={18} color={Colors.light.text} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.sheetLabel}>Deine Adresse</Text>
+            <TextInput
+              style={styles.addressInput}
+              value={addressInput}
+              onChangeText={setAddressInput}
+              placeholder="Straße, Hausnummer, Stadt"
+              placeholderTextColor={Colors.light.textTertiary}
+              autoCapitalize="words"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={saveAddress}
+            />
+            <Text style={styles.addressHint}>
+              Wird nur für deinen 500-Meter-Heimbereich genutzt und nicht öffentlich angezeigt.
+            </Text>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.saveButton,
+                (pressed || savingAddress) && { opacity: 0.78 },
+              ]}
+              disabled={savingAddress}
+              onPress={saveAddress}
+            >
+              {savingAddress ? (
+                <ActivityIndicator color={Colors.light.onPrimary} />
+              ) : (
+                <Text style={styles.saveButtonText}>Adresse speichern</Text>
+              )}
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -263,6 +374,79 @@ const styles = StyleSheet.create({
   emptyBtnText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+    color: Colors.light.onPrimary,
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.48)",
+  },
+  editSheet: {
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderWidth: 2,
+    borderColor: Colors.light.separator,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 28,
+    gap: 12,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    color: Colors.light.text,
+  },
+  closeButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.light.backgroundTertiary,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
+  },
+  sheetLabel: {
+    marginTop: 4,
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: Colors.light.text,
+  },
+  addressInput: {
+    minHeight: 48,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: Colors.light.separator,
+    backgroundColor: Colors.light.background,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
+    color: Colors.light.text,
+  },
+  addressHint: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.light.textSecondary,
+    lineHeight: 17,
+  },
+  saveButton: {
+    minHeight: 48,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.light.primary,
+    borderWidth: 2,
+    borderColor: Colors.light.separator,
+  },
+  saveButtonText: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
     color: Colors.light.onPrimary,
   },
 });
