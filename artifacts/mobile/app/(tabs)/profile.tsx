@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -41,9 +41,12 @@ export default function ProfileScreen() {
   const [addressInput, setAddressInput] = useState(homeLocation?.address ?? "");
   const [savingAddress, setSavingAddress] = useState(false);
 
-  const myPosts = posts.filter((p) => p.userId === currentUser.id);
+  const myPosts = useMemo(
+    () => posts.filter((p) => p.userId === currentUser.id),
+    [posts, currentUser.id],
+  );
 
-  const renderItem = ({ item }: { item: Post }) => <PostCard post={item} />;
+  const renderItem = useCallback(({ item }: { item: Post }) => <PostCard post={item} />, []);
 
   useEffect(() => {
     if (!editOpen) {

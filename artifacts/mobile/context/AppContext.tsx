@@ -68,6 +68,21 @@ export type Comment = {
   createdAt: string;
 };
 
+export type ChatMessage = {
+  id: string;
+  senderId: string;
+  text: string;
+  time: string;
+  imageUri?: string;
+};
+
+export type MapFriend = {
+  id: string;
+  name: string;
+  avatarUrl: string;
+  activity: string;
+};
+
 export type PartyMember = {
   id: string;
   name: string;
@@ -271,6 +286,10 @@ type AppContextType = {
   posts: Post[];
   comments: Comment[];
   parties: Party[];
+  mapFriends: MapFriend[];
+  setMapFriends: (friends: MapFriend[]) => void;
+  localMessages: Record<string, ChatMessage[]>;
+  addLocalMessage: (threadId: string, msg: ChatMessage) => void;
   refreshPosts: () => Promise<void>;
   addPost: (
     content: string,
@@ -286,6 +305,8 @@ type AppContextType = {
   getPostById: (postId: string) => Post | undefined;
   updateProfileLocation: (locationName: string) => Promise<void>;
   createParty: (name: string, lat: number, lng: number, members: PartyMember[]) => void;
+  deleteParty: (id: string) => void;
+  updatePartyMembers: (id: string, members: PartyMember[]) => void;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -393,6 +414,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [comments, setComments] = useState<Comment[]>(SEED_COMMENTS);
   const [parties, setParties] = useState<Party[]>([]);
   const [currentUser, setCurrentUser] = useState<User>(ME);
+  const [mapFriends, setMapFriends] = useState<MapFriend[]>([]);
+  const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
+
+  const addLocalMessage = useCallback((threadId: string, msg: ChatMessage) => {
+    setLocalMessages((prev) => ({
+      ...prev,
+      [threadId]: [...(prev[threadId] ?? []), msg],
+    }));
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -781,6 +811,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [currentUser]
   );
 
+  const deleteParty = useCallback((id: string) => {
+    setParties((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  const updatePartyMembers = useCallback((id: string, members: PartyMember[]) => {
+    setParties((prev) => prev.map((p) => (p.id === id ? { ...p, members } : p)));
+  }, []);
+
   const updateProfileLocation = useCallback(
     async (locationName: string) => {
       const nextLocation = locationName.trim();
@@ -807,6 +845,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       posts,
       comments,
       parties,
+      mapFriends,
+      setMapFriends,
+      localMessages,
+      addLocalMessage,
       refreshPosts,
       addPost,
       deletePost,
@@ -817,12 +859,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getPostById,
       updateProfileLocation,
       createParty,
+      deleteParty,
+      updatePartyMembers,
     }),
     [
       currentUser,
       posts,
       comments,
       parties,
+      mapFriends,
+      setMapFriends,
+      localMessages,
+      addLocalMessage,
       refreshPosts,
       addPost,
       deletePost,
@@ -833,6 +881,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getPostById,
       updateProfileLocation,
       createParty,
+      deleteParty,
+      updatePartyMembers,
     ],
   );
 

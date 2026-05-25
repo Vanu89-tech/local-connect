@@ -116,12 +116,6 @@ function ClassicTabLayout() {
             <CreateTabButton onPress={() => router.push("/create-post")} />
           ),
         }}
-        listeners={{
-          tabPress: (e) => {
-            e.preventDefault();
-            router.push("/create-post");
-          },
-        }}
       />
       <Tabs.Screen
         name="profile"

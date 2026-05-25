@@ -21,6 +21,34 @@ Der User möchte iterativ im Simulator testen und Features direkt weiterentwicke
 Style-System ist vollständig aufgeräumt. Alle `comic*`-Aliase wurden durch neutrale Tokens ersetzt.
 Alle Screens wurden geprüft und bereinigt. TypeScript-Check sauber.
 
+## Zuletzt erledigt (2026-05-25) — Session 4
+
+### Party-System komplett (map.tsx + AppContext.tsx)
+- "Party starten"-Button an den oberen Rand des Composer-Panels verschoben
+- Bug fix: Party wurde nicht auf der Karte angezeigt (zIndex 95 + 30m lat-Offset gegen me-Marker-Überlappung)
+- Bug fix: Party wurde immer am Heimstandort erstellt statt am eingegebenen Ort (geocoding-Override entfernt)
+- `handleCreateParty` async: geocodet die Adresse mit `Location.geocodeAsync()` vor Party-Erstellung
+- Sofortiges imperative map-Update via `webViewRef.current.injectJavaScript(...)` nach Party-Erstellung
+- Party-Management-UI für den Ersteller: Dropdown mit "Mitglied hinzufügen", "Mitglied entfernen", "Party löschen"
+- `deleteParty` und `updatePartyMembers` in AppContext hinzugefügt
+
+### Codebase-Cleanup (alle Tabs)
+- `map.tsx`: tote `areMapPartiesEqual`-Funktion, `renderedUsers/Pois/Parties`-States + Debounce-Effect, `visibleParties`-Memo entfernt
+- `index.tsx`: `Animated`-Import + totes `emojiAnim`-Ref + Animation-Effect entfernt; `now()` → modul-level `nowTime()`; alle Callbacks in `useCallback` gewrappt; Bug `Date.nowTime()` → `Date.now()` behoben
+- `profile.tsx`: `myPosts` → `useMemo`, `renderItem` → `useCallback`; Imports ergänzt
+- `_layout.tsx`: toten `listeners`-Block auf "create"-Tab entfernt (feuert nie wenn `tabBarButton` gesetzt)
+
+### /sync Skill erstellt
+- Skills-Plugin-Verzeichnis: `~/Library/Application Support/Claude/.../skills/sync/SKILL.md`
+- Workflow: Memory updaten (CODEX_HANDOFF, CURRENT_STATE, project_localconnect) → commit → push
+
+Betroffene Dateien:
+- `artifacts/mobile/app/(tabs)/map.tsx`
+- `artifacts/mobile/app/(tabs)/index.tsx`
+- `artifacts/mobile/app/(tabs)/profile.tsx`
+- `artifacts/mobile/app/(tabs)/_layout.tsx`
+- `artifacts/mobile/context/AppContext.tsx`
+
 ## Zuletzt erledigt (2026-05-24) — Session 3
 
 ### Proximity Radar – Radar-Overlay Fix (map.tsx)

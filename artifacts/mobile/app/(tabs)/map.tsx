@@ -1,11 +1,16 @@
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -157,36 +162,6 @@ function areLivePoisEqual(a: LivePoi[], b: LivePoi[]): boolean {
   return true;
 }
 
-function areMapPartiesEqual(a: MapParty[], b: MapParty[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const x = a[i];
-    const y = b[i];
-    if (
-      x.id !== y.id ||
-      x.name !== y.name ||
-      x.hostName !== y.hostName ||
-      Math.abs(x.lat - y.lat) > 0.000001 ||
-      Math.abs(x.lng - y.lng) > 0.000001 ||
-      x.members.length !== y.members.length
-    ) {
-      return false;
-    }
-    for (let j = 0; j < x.members.length; j += 1) {
-      const xm = x.members[j];
-      const ym = y.members[j];
-      if (
-        xm.id !== ym.id ||
-        xm.name !== ym.name ||
-        Math.abs(xm.lat - ym.lat) > 0.000001 ||
-        Math.abs(xm.lng - ym.lng) > 0.000001
-      ) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
 
 const FILTER_OPTIONS: { mode: MapFilterMode; label: string; icon: string }[] = [
   { mode: "all", label: "Alles", icon: "◎" },
@@ -419,22 +394,21 @@ function applyFallbackLivePois(
   setLivePois((prev) => (prev.length ? prev : fallbackPois));
 }
 
+function computeNightFactor(now: Date): { nightFactor: number; dawnDuskFactor: number } {
+  const m = now.getHours() * 60 + now.getMinutes();
+  if (m < 360 || m >= 1320) return { nightFactor: 1.0, dawnDuskFactor: 0 };       // 22:00–06:00 Nacht
+  if (m < 480) { const t = (m - 360) / 120; return { nightFactor: 1 - t, dawnDuskFactor: Math.sin(t * Math.PI) }; } // 06:00–08:00 Morgenrot
+  if (m < 1080) return { nightFactor: 0, dawnDuskFactor: 0 };                       // 08:00–18:00 Tag
+  if (m < 1200) { const t = (m - 1080) / 120; return { nightFactor: t * 0.7, dawnDuskFactor: Math.sin(t * Math.PI) }; } // 18:00–20:00 Dämmerung
+  const t = (m - 1200) / 120; return { nightFactor: 0.7 + t * 0.3, dawnDuskFactor: 0 }; // 20:00–22:00 Abend
+}
+
 function buildMapHtml(
   lat: number,
   lng: number,
-  activeUsers: MapUser[],
-  livePois: LivePoi[],
-  parties: MapParty[],
   locationName: string,
-  filterMode: MapFilterMode,
-  presenceMode: MapPresenceMode,
   showDevMapTools: boolean
 ) {
-  const usersJson = JSON.stringify(activeUsers);
-  const livePoisJson = JSON.stringify(livePois);
-  const partiesJson = JSON.stringify(parties);
-  const filterModeJson = JSON.stringify(filterMode);
-  const presenceModeJson = JSON.stringify(presenceMode);
   const mapStyle = Colors.map;
   const appColors = Colors.light;
   const isNeonStyle = Colors.activeStyle.id === "neon";
@@ -746,6 +720,7 @@ function buildMapHtml(
     var markerRefs = [];
     var poiMarkerEntries = [];
     var poiVisibilityRaf = null;
+    window._mapUsersById = {};
 
 	    var map = new maplibregl.Map({
 	      container: 'map',
@@ -1298,13 +1273,24 @@ function buildMapHtml(
       }, 260);
     });
 
+    map.on('dragstart', function() {
+      markerRefs.forEach(function(marker) {
+        try {
+          var p = marker.getPopup && marker.getPopup();
+          if (p && p.isOpen()) p.remove();
+        } catch(_) {}
+      });
+    });
+
     // ── Event delegation ──────────────────────────────────────────────────────
     document.addEventListener('click', function(e) {
       var t = e.target;
       while (t && t !== document) {
         if (t.getAttribute && t.getAttribute('data-user-id')) {
           e.preventDefault(); e.stopPropagation();
-          postNativeMessage({ type: 'profile', id: t.getAttribute('data-user-id') });
+          var uid = t.getAttribute('data-user-id');
+          var ud = (window._mapUsersById && window._mapUsersById[uid]) || {};
+          postNativeMessage({ type: 'user_detail', id: uid, name: ud.name || '', avatarUrl: ud.avatarUrl || '', isFriend: !!ud.isFriend, activity: ud.activity || '' });
           return;
         }
         t = t.parentNode;
@@ -1319,14 +1305,13 @@ function buildMapHtml(
     }
 
     function infoSheetHtml(title, subtitle, iconHtml, userId, avatarSrc) {
-      var heading = userId
-        ? '<a data-user-id="' + userId + '" class="info-sheet-title">' + title + '</a>'
-        : '<div class="info-sheet-title">' + title + '</div>';
+      var outerAttrs = userId ? ' data-user-id="' + userId + '" style="cursor:pointer"' : '';
+      var heading = '<div class="info-sheet-title">' + title + '</div>';
       var visual = avatarSrc
         ? '<img class="info-sheet-avatar" src="' + avatarSrc + '" alt="" />'
         : '<div class="info-sheet-icon">' + (iconHtml || 'ℹ️') + '</div>';
       return [
-        '<div class="info-sheet">',
+        '<div class="info-sheet"' + outerAttrs + '>',
         visual,
         '<div>',
         heading,
@@ -1382,7 +1367,7 @@ function buildMapHtml(
     }
 
     function addLivePoiMarkers() {
-      var pois = ${livePoisJson};
+      var pois = window._mapPois || [];
       if (!Array.isArray(pois) || pois.length === 0) return;
 
       var styles = {
@@ -1570,7 +1555,7 @@ function buildMapHtml(
     }
 
     function addPartyAndMemberMarkers() {
-      var partyData = ${partiesJson};
+      var partyData = window._mapParties || [];
       var activePartyId = null;
       var partyReturnView = null;
       var partyAnimationToken = 0;
@@ -1598,6 +1583,7 @@ function buildMapHtml(
           '🎉'
         );
         partyEl.style.cursor = 'pointer';
+        partyEl.style.zIndex = '95';
         partyEl.className = 'party-pulse';
 
         function handlePartyClick(event) {
@@ -1679,10 +1665,11 @@ function buildMapHtml(
     }
 
     function addUserMarkers() {
-      var users = ${usersJson};
-      var currentFilter = ${filterModeJson};
+      var users = window._mapUsers || [];
+      var currentFilter = window._mapFilter || 'all';
       var neonYellow = '#efff3a';
       var neonGreen = '#00ffb2';
+      window._mapUsersById = {};
 
       users.forEach(function(u) {
         var showDatingMarker = currentFilter === 'dating' && u.intent !== 'active';
@@ -1749,6 +1736,7 @@ function buildMapHtml(
         var avatarSrc = u.avatarUrl
           ? u.avatarUrl
           : 'https://api.dicebear.com/9.x/thumbs/png?seed=' + encodeURIComponent(u.id || u.name || 'local');
+        window._mapUsersById[u.id] = { name: u.name || '', avatarUrl: avatarSrc, isFriend: !!u.isFriend, activity: activityText };
         var friendPopupHtml = infoSheetHtml(
           u.name || 'Freund',
           activityText,
@@ -1769,7 +1757,7 @@ function buildMapHtml(
     }
 
     function addMyMarker() {
-      var myPresence = ${presenceModeJson};
+      var myPresence = window._mapPresence || 'online';
       var mePopupText = 'Gerade online';
       var meEl = null;
 
@@ -1805,7 +1793,7 @@ function buildMapHtml(
 
     function renderMapLayersAndMarkers() {
 	      clearMarkers();
-	      var currentFilter = ${filterModeJson};
+      var currentFilter = window._mapFilter || 'all';
 	      var hidePois = currentFilter === 'people' || currentFilter === 'friends' || currentFilter === 'dating';
 
 	      addStyledBuildings();
@@ -1832,6 +1820,48 @@ function buildMapHtml(
       postNativeMessage({ type: 'map_error', message: msg });
     });
 
+    window._mapUsers = [];
+    window._mapPois = [];
+    window._mapParties = [];
+    window._mapFilter = 'all';
+    window._mapPresence = 'online';
+
+    window.updateMapData = function(users, pois, parties, filter, presence) {
+      window._mapUsers = users || [];
+      window._mapPois = pois || [];
+      window._mapParties = parties || [];
+      window._mapFilter = filter || 'all';
+      window._mapPresence = presence || 'online';
+      if (window.map && window.map.isStyleLoaded()) {
+        renderMapLayersAndMarkers();
+        schedulePoiMarkerVisibilityUpdate();
+      }
+    };
+
+    window.applyTimeOfDay = function(nightFactor, dawnDuskFactor) {
+      window._tod = { n: nightFactor, d: dawnDuskFactor || 0 };
+      var brightness = (0.9 - nightFactor * 0.42).toFixed(3);
+      var saturation  = (1.25 + nightFactor * 0.35).toFixed(3);
+      var contrast    = (1.06 + nightFactor * 0.14).toFixed(3);
+      var vigOpacity  = (0.46 + nightFactor * 0.34).toFixed(3);
+      var vigSize     = Math.round(90 + nightFactor * 50);
+      var canvas = document.querySelector('.maplibregl-canvas');
+      if (canvas) canvas.style.filter = 'brightness(' + brightness + ') saturate(' + saturation + ') contrast(' + contrast + ')';
+      var vignette = document.getElementById('vignette');
+      if (vignette) {
+        vignette.style.boxShadow = 'inset 0 0 ' + vigSize + 'px rgba(0,0,0,' + vigOpacity + ')';
+        if (dawnDuskFactor > 0.05) {
+          var a = (dawnDuskFactor * 0.18).toFixed(3);
+          vignette.style.background = 'radial-gradient(ellipse at 50% 100%, rgba(255,140,20,' + a + ') 0%, transparent 60%)';
+        } else {
+          vignette.style.background = '';
+        }
+      }
+    };
+    map.on('style.load', function() {
+      if (window._tod) window.applyTimeOfDay(window._tod.n, window._tod.d);
+    });
+
   </script>
 </body>
 </html>`;
@@ -1840,11 +1870,12 @@ function buildMapHtml(
 export default function MapScreen() {
   const { user } = useAuth();
   const { homeLocation, currentLocationName, effectivePresenceMode } = useLocation();
-  const { posts, parties: storedParties, createParty, currentUser } = useApp();
+  const { posts, parties: storedParties, createParty, deleteParty, updatePartyMembers, currentUser, setMapFriends, addLocalMessage } = useApp();
   const { nearbyUsers: radarUsers, radarSettings, myLiveLocation } = useProximity();
   const insets = useSafeAreaInsets();
 
   const webViewRef = useRef<WebViewType>(null);
+  const injectMapDataRef = useRef<(() => void) | null>(null);
 
   const injectRadar = useCallback(() => {
     if (!webViewRef.current) return;
@@ -1905,22 +1936,44 @@ export default function MapScreen() {
     injectRadar();
   }, [injectRadar]);
 
+  const injectTimeOfDay = useCallback(() => {
+    if (!webViewRef.current) return;
+    const { nightFactor, dawnDuskFactor } = computeNightFactor(new Date());
+    webViewRef.current.injectJavaScript(
+      `(function(){if(window.applyTimeOfDay)window.applyTimeOfDay(${nightFactor.toFixed(3)},${dawnDuskFactor.toFixed(3)});})();true;`
+    );
+  }, []);
+
+  const onMapLoad = useCallback(() => {
+    injectRadar();
+    injectTimeOfDay();
+    injectMapDataRef.current?.();
+  }, [injectRadar, injectTimeOfDay]);
+
   const [showPartyComposer, setShowPartyComposer] = useState(false);
   const [partyName, setPartyName] = useState("");
+  const [partyAddress, setPartyAddress] = useState("");
   const [selectedPartyMemberIds, setSelectedPartyMemberIds] = useState<string[]>([]);
+  const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
+  const [partyManageSubview, setPartyManageSubview] = useState<"add" | "remove" | null>(null);
+  const [partyAddIds, setPartyAddIds] = useState<string[]>([]);
   const [filterMode, setFilterMode] = useState<MapFilterMode>("all");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [presenceMode, setPresenceMode] = useState<MapPresenceMode>("online");
   const [presenceMenuOpen, setPresenceMenuOpen] = useState(false);
   const [activeUsers, setActiveUsers] = useState<MapUser[]>([]);
   const [livePois, setLivePois] = useState<LivePoi[]>([]);
-  const [renderedUsers, setRenderedUsers] = useState<MapUser[]>([]);
-  const [renderedPois, setRenderedPois] = useState<LivePoi[]>([]);
-  const [renderedParties, setRenderedParties] = useState<MapParty[]>([]);
   const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
   const [isMapActive, setIsMapActive] = useState(false);
   const partyPanelAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<TextInput>(null);
+  const [selectedMapUser, setSelectedMapUser] = useState<{
+    id: string; name: string; avatarUrl: string; isFriend: boolean; activity: string;
+  } | null>(null);
+  const [userPanelDraft, setUserPanelDraft] = useState("");
+  const [userMediaModalOpen, setUserMediaModalOpen] = useState(false);
+  const userPanelAnim = useRef(new Animated.Value(0)).current;
+  const userPanelInputRef = useRef<TextInput>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -1938,6 +1991,16 @@ export default function MapScreen() {
       mass: 0.9,
     }).start();
   }, [partyPanelAnim, showPartyComposer]);
+
+  useEffect(() => {
+    Animated.spring(userPanelAnim, {
+      toValue: selectedMapUser ? 1 : 0,
+      useNativeDriver: false,
+      damping: 18,
+      stiffness: 180,
+      mass: 0.9,
+    }).start();
+  }, [userPanelAnim, selectedMapUser]);
 
   const allUsers = useMemo(() => {
     const seen = new Set<string>();
@@ -2179,6 +2242,14 @@ out center tags ${LIVE_POI_LIMIT};`;
     return () => clearInterval(interval);
   }, [fetchLivePois, filterMode, homeLocation, isMapActive]);
 
+  useEffect(() => {
+    if (!isMapActive) return;
+    injectTimeOfDay();
+    const interval = setInterval(injectTimeOfDay, 60_000);
+    return () => clearInterval(interval);
+  }, [injectTimeOfDay, isMapActive]);
+
+
   // Combine mock seed parties + user-created parties
   const allParties = useMemo(() => {
     if (!homeLocation) return [];
@@ -2200,29 +2271,17 @@ out center tags ${LIVE_POI_LIMIT};`;
       }),
     }));
 
-    const userParties = storedParties.map((p) => {
-      const hostIsCurrentUser = p.hostId === currentUser.id;
-      const partyLat = hostIsCurrentUser ? homeLocation.lat : p.lat;
-      const partyLng = hostIsCurrentUser ? homeLocation.lng : p.lng;
-      const deltaLat = partyLat - p.lat;
-      const deltaLng = partyLng - p.lng;
-
-      return {
-        id: p.id,
-        name: p.name,
-        lat: partyLat,
-        lng: partyLng,
-        hostName: p.hostName,
-        members: p.members.map((member) => ({
-          ...member,
-          lat: member.lat + deltaLat,
-          lng: member.lng + deltaLng,
-        })),
-      };
-    });
+    const userParties = storedParties.map((p) => ({
+      id: p.id,
+      name: p.name,
+      lat: p.lat,
+      lng: p.lng,
+      hostName: p.hostName,
+      members: p.members,
+    }));
 
     return [...mockParties, ...userParties];
-  }, [homeLocation, allUsers, storedParties, currentUser.id]);
+  }, [homeLocation, allUsers, storedParties]);
 
 	  const simulatedUsers = useMemo<MapUser[]>(() => {
 	    if (!__DEV__ || !homeLocation) return [];
@@ -2269,21 +2328,54 @@ out center tags ${LIVE_POI_LIMIT};`;
     return mapUsers;
   }, [filterMode, mapUsers]);
 
-  const visibleParties = useMemo(() => allParties, [allParties]);
+
+  const friendUsers = useMemo(
+    () =>
+      mapUsers
+        .filter((u) => u.isFriend)
+        .map((u) => ({
+          id: u.id,
+          name: u.name,
+          avatarUrl: u.avatarUrl ?? `https://api.dicebear.com/9.x/thumbs/png?seed=${encodeURIComponent(u.id)}`,
+          activity:
+            u.intent === "relationship"
+              ? "Sucht eine Beziehung"
+              : u.intent === "friend"
+                ? "Sucht neue Freunde"
+                : "Gerade online unterwegs",
+        })),
+    [mapUsers],
+  );
 
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      setRenderedUsers((prev) => (areMapUsersEqual(prev, visibleUsers) ? prev : visibleUsers));
-      setRenderedPois((prev) => (areLivePoisEqual(prev, livePois) ? prev : livePois));
-      setRenderedParties((prev) => (areMapPartiesEqual(prev, visibleParties) ? prev : visibleParties));
-    }, 450);
+    setMapFriends(friendUsers);
+  }, [friendUsers, setMapFriends]);
 
-    return () => clearTimeout(timeout);
-  }, [livePois, visibleParties, visibleUsers]);
+
+  const partyPickerUsers = useMemo(() => {
+    const activityLabel = (u: MapUser) =>
+      u.intent === "relationship" ? "Sucht eine Beziehung"
+      : u.intent === "friend" ? "Sucht neue Freunde"
+      : "Gerade online unterwegs";
+    return [...mapUsers]
+      .sort((a, b) => (b.isFriend ? 1 : 0) - (a.isFriend ? 1 : 0))
+      .map((u) => ({
+        id: u.id,
+        name: u.name,
+        avatar: u.avatarUrl ?? `https://api.dicebear.com/9.x/thumbs/png?seed=${encodeURIComponent(u.id)}`,
+        isFriend: !!u.isFriend,
+        activity: activityLabel(u),
+      }));
+  }, [mapUsers]);
 
   const selectedPartyMembers = useMemo(
-    () => allUsers.filter((user) => selectedPartyMemberIds.includes(user.id)),
-    [allUsers, selectedPartyMemberIds]
+    () => partyPickerUsers.filter((u) => selectedPartyMemberIds.includes(u.id)),
+    [partyPickerUsers, selectedPartyMemberIds]
+  );
+
+  const myParty = useMemo(
+    () => storedParties.find((p) => p.hostId === currentUser.id) ?? null,
+    [storedParties, currentUser.id]
   );
 
   const togglePartyMember = useCallback((id: string) => {
@@ -2299,19 +2391,30 @@ out center tags ${LIVE_POI_LIMIT};`;
     return buildMapHtml(
       homeLocation.lat,
       homeLocation.lng,
-      renderedUsers,
-      renderedPois,
-      renderedParties,
       currentLocationName ?? homeLocation.name,
-      filterMode,
-      presenceMode,
       __DEV__
     );
-  }, [homeLocation, renderedUsers, renderedPois, renderedParties, currentLocationName, filterMode, presenceMode]);
+  }, [homeLocation, currentLocationName]);
+
+  const injectMapData = useCallback(() => {
+    if (!webViewRef.current) return;
+    const script = `(function(){if(window.updateMapData)window.updateMapData(${JSON.stringify(visibleUsers)},${JSON.stringify(livePois)},${JSON.stringify(allParties)},${JSON.stringify(filterMode)},${JSON.stringify(presenceMode)});})();true;`;
+    webViewRef.current.injectJavaScript(script);
+  }, [visibleUsers, livePois, allParties, filterMode, presenceMode]);
+
+  useEffect(() => {
+    injectMapDataRef.current = injectMapData;
+    if (isMapActive) injectMapData();
+  }, [injectMapData, isMapActive]);
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === "user_detail" && data.id) {
+        setSelectedMapUser({ id: data.id, name: data.name ?? "", avatarUrl: data.avatarUrl ?? "", isFriend: !!data.isFriend, activity: data.activity ?? "" });
+        setUserPanelDraft("");
+        return;
+      }
       if (data.type === "profile" && data.id) {
         router.push(`/user/${data.id}`);
         return;
@@ -2322,7 +2425,7 @@ out center tags ${LIVE_POI_LIMIT};`;
     } catch (_) {}
   }, []);
 
-  const handleCreateParty = useCallback(() => {
+  const handleCreateParty = useCallback(async () => {
     if (effectivePresenceMode === "home") {
       Alert.alert(
         "Daheim-Modus",
@@ -2332,8 +2435,22 @@ out center tags ${LIVE_POI_LIMIT};`;
     }
     if (!homeLocation || !partyName.trim() || selectedPartyMembers.length === 0) return;
 
-    const partyLat = homeLocation.lat;
-    const partyLng = homeLocation.lng;
+    let partyLat = homeLocation.lat + 0.00028;
+    let partyLng = homeLocation.lng;
+
+    if (partyAddress.trim()) {
+      try {
+        const results = await Location.geocodeAsync(partyAddress.trim());
+        if (results.length > 0) {
+          partyLat = results[0].latitude;
+          partyLng = results[0].longitude;
+        } else {
+          Alert.alert("Adresse nicht gefunden", "Die eingegebene Adresse konnte nicht gefunden werden. Die Party wird an deinem Standort erstellt.");
+        }
+      } catch {
+        Alert.alert("Geocoding-Fehler", "Die Adresse konnte nicht aufgelöst werden. Die Party wird an deinem Standort erstellt.");
+      }
+    }
 
     const members: PartyMember[] = selectedPartyMembers.map((member) => ({
       id: member.id,
@@ -2343,10 +2460,121 @@ out center tags ${LIVE_POI_LIMIT};`;
     }));
 
     createParty(partyName.trim(), partyLat, partyLng, members);
+
+    // Immediately push the new party into the WebView without waiting for
+    // the React re-render cycle, and navigate the map to the party location.
+    if (webViewRef.current) {
+      const newPartyForMap = {
+        id: `user-preview-${Date.now()}`,
+        name: partyName.trim(),
+        lat: partyLat,
+        lng: partyLng,
+        hostName: currentUser.name,
+        members,
+      };
+      const updatedParties = [...allParties, newPartyForMap];
+      webViewRef.current.injectJavaScript(
+        `(function(){
+          if(window.updateMapData) window.updateMapData(
+            ${JSON.stringify(visibleUsers)},
+            ${JSON.stringify(livePois)},
+            ${JSON.stringify(updatedParties)},
+            ${JSON.stringify(filterMode)},
+            ${JSON.stringify(presenceMode)}
+          );
+          if(window.map) window.map.easeTo({ center: [${partyLng}, ${partyLat}], zoom: 15, duration: 700 });
+        })();true;`
+      );
+    }
+
     setPartyName("");
+    setPartyAddress("");
     setSelectedPartyMemberIds([]);
     setShowPartyComposer(false);
-  }, [effectivePresenceMode, homeLocation, partyName, selectedPartyMembers, createParty]);
+  }, [effectivePresenceMode, homeLocation, partyName, partyAddress, selectedPartyMembers, createParty,
+      currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode]);
+
+  const handleSendUserMessage = useCallback(() => {
+    if (!userPanelDraft.trim() || !selectedMapUser) return;
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const now = new Date();
+    const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    addLocalMessage(selectedMapUser.id, {
+      id: `map-msg-${Date.now()}`,
+      senderId: "me",
+      text: userPanelDraft.trim(),
+      time,
+    });
+    setUserPanelDraft("");
+    setSelectedMapUser(null);
+  }, [selectedMapUser, userPanelDraft, addLocalMessage]);
+
+  const handleDeleteParty = useCallback(() => {
+    if (!myParty) return;
+    Alert.alert("Party löschen", "Willst du die Party wirklich löschen?", [
+      { text: "Abbrechen", style: "cancel" },
+      {
+        text: "Löschen", style: "destructive",
+        onPress: () => {
+          deleteParty(myParty.id);
+          setPartyDropdownOpen(false);
+          setPartyManageSubview(null);
+          setShowPartyComposer(false);
+        },
+      },
+    ]);
+  }, [myParty, deleteParty]);
+
+  const handleSaveAddMembers = useCallback(() => {
+    if (!myParty) return;
+    const newMembers = partyPickerUsers
+      .filter((u) => partyAddIds.includes(u.id))
+      .map((u) => ({
+        id: u.id,
+        name: u.name,
+        lat: myParty.lat + (Math.random() - 0.5) * 0.0004,
+        lng: myParty.lng + (Math.random() - 0.5) * 0.0004,
+      }));
+    const existingIds = new Set(myParty.members.map((m) => m.id));
+    const merged = [...myParty.members, ...newMembers.filter((m) => !existingIds.has(m.id))];
+    updatePartyMembers(myParty.id, merged);
+    setPartyAddIds([]);
+    setPartyManageSubview(null);
+  }, [myParty, partyPickerUsers, partyAddIds, updatePartyMembers]);
+
+  const handleRemoveMember = useCallback((memberId: string) => {
+    if (!myParty) return;
+    updatePartyMembers(myParty.id, myParty.members.filter((m) => m.id !== memberId));
+  }, [myParty, updatePartyMembers]);
+
+  const handleSendFriendRequest = useCallback(() => {
+    if (!selectedMapUser) return;
+    if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert("Anfrage gesendet ✓", `Du hast ${selectedMapUser.name} eine Freundschaftsanfrage geschickt.`);
+    setSelectedMapUser(null);
+  }, [selectedMapUser]);
+
+  const handleUserPickImage = useCallback(async () => {
+    setUserMediaModalOpen(false);
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.85, allowsEditing: true });
+    if (!result.canceled && result.assets[0]?.uri) {
+      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Alert.alert("Foto gesendet ✓", `Das Foto wurde an ${selectedMapUser?.name} gesendet.`);
+      setSelectedMapUser(null);
+    }
+  }, [selectedMapUser]);
+
+  const handleUserTakePhoto = useCallback(async () => {
+    setUserMediaModalOpen(false);
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") return;
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.85, allowsEditing: true });
+    if (!result.canceled && result.assets[0]?.uri) {
+      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Alert.alert("Foto gesendet ✓", `Das Foto wurde an ${selectedMapUser?.name} gesendet.`);
+      setSelectedMapUser(null);
+    }
+  }, [selectedMapUser]);
 
   if (!homeLocation || !html) {
     return (
@@ -2369,9 +2597,12 @@ out center tags ${LIVE_POI_LIMIT};`;
     PRESENCE_OPTIONS.find((option) => option.mode === presenceMode) ??
     PRESENCE_OPTIONS[0];
   const canCreateParty = partyName.trim().length > 0 && selectedPartyMembers.length > 0;
+  const userPanelHeight = userPanelAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 400] });
+  const userPanelWidth = userPanelAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 286] });
+  const userPanelOpacity = userPanelAnim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0, 1] });
   const partyPanelHeight = partyPanelAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [44, 360],
+    outputRange: [44, 480],
   });
   const partyPanelWidth = partyPanelAnim.interpolate({
     inputRange: [0, 1],
@@ -2571,7 +2802,7 @@ out center tags ${LIVE_POI_LIMIT};`;
           req.url.startsWith("https://") ||
           req.url.startsWith("http://")
         }
-        onLoad={injectRadar}
+        onLoad={onMapLoad}
       />
 
       <Animated.View
@@ -2615,91 +2846,329 @@ out center tags ${LIVE_POI_LIMIT};`;
           pointerEvents={showPartyComposer ? "auto" : "none"}
           style={[styles.partyComposerBody, { opacity: partyPanelOpacity }]}
         >
-          <ScrollView
-            style={styles.partyComposerScroll}
-            contentContainerStyle={styles.partyComposerScrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator
-          >
-            <Text style={styles.partyFieldLabel}>Partyname</Text>
-            <TextInput
-              ref={inputRef}
-              style={styles.partyNameInput}
-              value={partyName}
-              onChangeText={setPartyName}
-              placeholder="z.B. Balkonrunde"
-              placeholderTextColor={Colors.light.textTertiary}
-              maxLength={40}
-              returnKeyType="done"
-              onSubmitEditing={handleCreateParty}
-            />
-
-            <Text style={styles.partyFieldLabel}>Mitglieder</Text>
-            <View style={styles.selectedMembersBox}>
-              {selectedPartyMembers.length > 0 ? (
-                selectedPartyMembers.map((member) => (
-                  <Pressable
-                    key={member.id}
-                    style={styles.selectedMemberRow}
-                    onPress={() => togglePartyMember(member.id)}
-                  >
-                    <Image source={{ uri: member.avatar }} style={styles.partyAvatar} />
-                    <Text style={styles.selectedMemberName}>{member.name}</Text>
-                    <Feather name="x" size={14} color={Colors.light.textTertiary} />
-                  </Pressable>
-                ))
-              ) : (
-                <Text style={styles.selectedMembersEmpty}>Noch niemand dabei</Text>
-              )}
-            </View>
-
-            <Text style={styles.partyFieldLabel}>Mitglieder hinzufügen</Text>
-            <View style={styles.memberPicker}>
-              {allUsers.map((user) => {
-                const selected = selectedPartyMemberIds.includes(user.id);
-                return (
-                  <Pressable
-                    key={user.id}
-                    style={[
-                      styles.memberOption,
-                      selected && styles.memberOptionSelected,
-                    ]}
-                    onPress={() => togglePartyMember(user.id)}
-                  >
-                    <Image source={{ uri: user.avatar }} style={styles.memberOptionAvatar} />
-                    <Text
-                      style={[
-                        styles.memberOptionName,
-                        selected && styles.memberOptionNameSelected,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {user.name}
-                    </Text>
-                    <Feather
-                      name={selected ? "check" : "plus"}
-                      size={14}
-                      color={selected ? "#7C3AED" : Colors.light.textTertiary}
-                    />
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.partyCreateButton,
-                !canCreateParty && styles.createBtnDisabled,
-              ]}
-              onPress={handleCreateParty}
-              disabled={!canCreateParty}
-              activeOpacity={0.85}
+          {myParty ? (
+            /* ── Management UI (party already exists) ── */
+            <ScrollView
+              style={styles.partyComposerScroll}
+              contentContainerStyle={styles.partyComposerScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.partyCreateButtonText}>Party starten</Text>
-            </TouchableOpacity>
-          </ScrollView>
+              {/* Party card – tap opens dropdown */}
+              <Pressable
+                style={styles.myPartyCard}
+                onPress={() => {
+                  setPartyDropdownOpen((o) => !o);
+                  setPartyManageSubview(null);
+                }}
+              >
+                <Text style={styles.myPartyCardEmoji}>🎉</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.myPartyCardName} numberOfLines={1}>{myParty.name}</Text>
+                  <Text style={styles.myPartyCardSub}>{myParty.members.length} Mitglied{myParty.members.length !== 1 ? "er" : ""}</Text>
+                </View>
+                <Feather name={partyDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={Colors.light.textSecondary} />
+              </Pressable>
+
+              {/* Dropdown menu */}
+              {partyDropdownOpen && partyManageSubview === null && (
+                <View style={styles.partyDropdown}>
+                  <Pressable style={styles.partyDropdownItem} onPress={() => { setPartyManageSubview("add"); setPartyAddIds([]); }}>
+                    <Feather name="user-plus" size={14} color={partyAccent} />
+                    <Text style={styles.partyDropdownText}>Mitglied hinzufügen</Text>
+                  </Pressable>
+                  <View style={styles.partyDropdownDivider} />
+                  <Pressable style={styles.partyDropdownItem} onPress={() => setPartyManageSubview("remove")}>
+                    <Feather name="user-minus" size={14} color={Colors.light.textSecondary} />
+                    <Text style={styles.partyDropdownText}>Mitglied entfernen</Text>
+                  </Pressable>
+                  <View style={styles.partyDropdownDivider} />
+                  <Pressable style={styles.partyDropdownItem} onPress={handleDeleteParty}>
+                    <Feather name="trash-2" size={14} color="#EF4444" />
+                    <Text style={[styles.partyDropdownText, { color: "#EF4444" }]}>Party löschen</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* Sub-view: add members */}
+              {partyManageSubview === "add" && (
+                <View style={{ gap: 8 }}>
+                  <Pressable style={styles.partyBackRow} onPress={() => setPartyManageSubview(null)}>
+                    <Feather name="arrow-left" size={13} color={Colors.light.textSecondary} />
+                    <Text style={styles.partyBackText}>Mitglied hinzufügen</Text>
+                  </Pressable>
+                  <TouchableOpacity
+                    style={[styles.partyCreateButton, partyAddIds.length === 0 && styles.createBtnDisabled]}
+                    onPress={handleSaveAddMembers}
+                    disabled={partyAddIds.length === 0}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.partyCreateButtonText}>Hinzufügen</Text>
+                  </TouchableOpacity>
+                  <View style={styles.memberPicker}>
+                    {partyPickerUsers
+                      .filter((u) => !myParty.members.some((m) => m.id === u.id))
+                      .map((user) => {
+                        const sel = partyAddIds.includes(user.id);
+                        return (
+                          <Pressable
+                            key={user.id}
+                            style={[styles.memberOption, sel && styles.memberOptionSelected]}
+                            onPress={() => setPartyAddIds((ids) => sel ? ids.filter((x) => x !== user.id) : [...ids, user.id])}
+                          >
+                            <Image source={{ uri: user.avatar }} style={styles.memberOptionAvatar} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={[styles.memberOptionName, sel && styles.memberOptionNameSelected]} numberOfLines={1}>
+                                {user.name}{user.isFriend ? " ★" : ""}
+                              </Text>
+                              <Text style={styles.memberOptionSub} numberOfLines={1}>{user.activity}</Text>
+                            </View>
+                            <Feather name={sel ? "check" : "plus"} size={14} color={sel ? partyAccent : Colors.light.textTertiary} />
+                          </Pressable>
+                        );
+                      })}
+                  </View>
+                </View>
+              )}
+
+              {/* Sub-view: remove members */}
+              {partyManageSubview === "remove" && (
+                <View style={{ gap: 8 }}>
+                  <Pressable style={styles.partyBackRow} onPress={() => setPartyManageSubview(null)}>
+                    <Feather name="arrow-left" size={13} color={Colors.light.textSecondary} />
+                    <Text style={styles.partyBackText}>Mitglied entfernen</Text>
+                  </Pressable>
+                  <View style={styles.memberPicker}>
+                    {myParty.members.length === 0 ? (
+                      <Text style={styles.selectedMembersEmpty}>Keine Mitglieder</Text>
+                    ) : (
+                      myParty.members.map((m) => (
+                        <Pressable
+                          key={m.id}
+                          style={styles.selectedMemberRow}
+                          onPress={() => handleRemoveMember(m.id)}
+                        >
+                          <Text style={[styles.selectedMemberName, { flex: 1 }]}>{m.name}</Text>
+                          <Feather name="x" size={14} color="#EF4444" />
+                        </Pressable>
+                      ))
+                    )}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          ) : (
+            /* ── Create UI (no party yet) ── */
+            <>
+              <TouchableOpacity
+                style={[styles.partyCreateButton, !canCreateParty && styles.createBtnDisabled]}
+                onPress={handleCreateParty}
+                disabled={!canCreateParty}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.partyCreateButtonText}>Party starten</Text>
+              </TouchableOpacity>
+              <ScrollView
+                style={styles.partyComposerScroll}
+                contentContainerStyle={styles.partyComposerScrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
+                <Text style={styles.partyFieldLabel}>Partyname</Text>
+                <TextInput
+                  ref={inputRef}
+                  style={styles.partyNameInput}
+                  value={partyName}
+                  onChangeText={setPartyName}
+                  placeholder="z.B. Balkonrunde"
+                  placeholderTextColor={Colors.light.textTertiary}
+                  maxLength={40}
+                  returnKeyType="done"
+                  onSubmitEditing={handleCreateParty}
+                />
+
+                <Text style={styles.partyFieldLabel}>Adresse / Ort</Text>
+                <View style={styles.partyLocationRow}>
+                  <TextInput
+                    style={[styles.partyNameInput, { flex: 1 }]}
+                    value={partyAddress}
+                    onChangeText={setPartyAddress}
+                    placeholder="Adresse eingeben…"
+                    placeholderTextColor={Colors.light.textTertiary}
+                    maxLength={80}
+                    returnKeyType="done"
+                  />
+                  <TouchableOpacity
+                    style={styles.currentLocationBtn}
+                    onPress={() => setPartyAddress(currentLocationName ?? homeLocation.name)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={styles.currentLocationBtnText}>📍</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.partyFieldLabel}>Mitglieder</Text>
+                <View style={styles.selectedMembersBox}>
+                  {selectedPartyMembers.length > 0 ? (
+                    selectedPartyMembers.map((member) => (
+                      <Pressable
+                        key={member.id}
+                        style={styles.selectedMemberRow}
+                        onPress={() => togglePartyMember(member.id)}
+                      >
+                        <Image source={{ uri: member.avatar }} style={styles.partyAvatar} />
+                        <Text style={styles.selectedMemberName}>{member.name}</Text>
+                        <Feather name="x" size={14} color={Colors.light.textTertiary} />
+                      </Pressable>
+                    ))
+                  ) : (
+                    <Text style={styles.selectedMembersEmpty}>Noch niemand dabei</Text>
+                  )}
+                </View>
+
+                <Text style={styles.partyFieldLabel}>Mitglieder hinzufügen</Text>
+                <View style={styles.memberPicker}>
+                  {partyPickerUsers.length === 0 ? (
+                    <Text style={styles.selectedMembersEmpty}>Niemand in der Nähe</Text>
+                  ) : (
+                    partyPickerUsers.map((user) => {
+                      const selected = selectedPartyMemberIds.includes(user.id);
+                      return (
+                        <Pressable
+                          key={user.id}
+                          style={[styles.memberOption, selected && styles.memberOptionSelected]}
+                          onPress={() => togglePartyMember(user.id)}
+                        >
+                          <Image source={{ uri: user.avatar }} style={styles.memberOptionAvatar} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.memberOptionName, selected && styles.memberOptionNameSelected]} numberOfLines={1}>
+                              {user.name}{user.isFriend ? " ★" : ""}
+                            </Text>
+                            <Text style={styles.memberOptionSub} numberOfLines={1}>{user.activity}</Text>
+                          </View>
+                          <Feather name={selected ? "check" : "plus"} size={14} color={selected ? partyAccent : Colors.light.textTertiary} />
+                        </Pressable>
+                      );
+                    })
+                  )}
+                </View>
+              </ScrollView>
+            </>
+          )}
         </Animated.View>
       </Animated.View>
+
+      {/* User Detail Panel – centred on map */}
+      <Pressable
+        style={[StyleSheet.absoluteFill, styles.userPanelOverlay]}
+        onPress={() => setSelectedMapUser(null)}
+        pointerEvents={selectedMapUser ? "auto" : "none"}
+      >
+        <Animated.View
+          style={[styles.userDetailPanel, { height: userPanelHeight, width: userPanelWidth }]}
+          onStartShouldSetResponder={() => true}
+        >
+        {selectedMapUser && (
+          <>
+            <View style={styles.userDetailHeader}>
+              <Image
+                source={{ uri: selectedMapUser.avatarUrl || `https://api.dicebear.com/9.x/thumbs/png?seed=${selectedMapUser.id}` }}
+                style={styles.userDetailAvatar}
+                contentFit="cover"
+              />
+              <View style={styles.userDetailHeaderText}>
+                <Text style={styles.userDetailName} numberOfLines={1}>{selectedMapUser.name}</Text>
+                <Text style={styles.userDetailSubtitle} numberOfLines={1}>
+                  {selectedMapUser.isFriend ? "Freund" : "Unbekannt"}
+                </Text>
+              </View>
+              <Pressable style={styles.userDetailCloseBtn} onPress={() => setSelectedMapUser(null)}>
+                <Feather name="x" size={17} color={Colors.light.textSecondary} />
+              </Pressable>
+            </View>
+
+            <Animated.View style={[styles.userDetailBody, { opacity: userPanelOpacity }]} pointerEvents="auto">
+              <ScrollView
+                contentContainerStyle={styles.userDetailScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {selectedMapUser.isFriend ? (
+                  <View style={styles.userActivityCard}>
+                    <Text style={styles.userActivityCardLabel}>Was er/sie macht</Text>
+                    <Text style={styles.userActivityCardText}>{selectedMapUser.activity}</Text>
+                  </View>
+                ) : (
+                  <Pressable style={styles.friendRequestBtn} onPress={handleSendFriendRequest}>
+                    <Feather name="user-plus" size={15} color="#fff" />
+                    <Text style={styles.friendRequestBtnText}>Freundschaftsanfrage senden</Text>
+                  </Pressable>
+                )}
+
+                <TextInput
+                  ref={userPanelInputRef}
+                  style={styles.userMessageInput}
+                  value={userPanelDraft}
+                  onChangeText={setUserPanelDraft}
+                  placeholder="Nachricht schreiben..."
+                  placeholderTextColor={Colors.light.textTertiary}
+                  multiline
+                  returnKeyType="default"
+                  blurOnSubmit={false}
+                />
+
+                <View style={styles.userActionRow}>
+                  {selectedMapUser.isFriend && (
+                    <Pressable style={styles.userMediaBtn} onPress={() => setUserMediaModalOpen(true)}>
+                      <Feather name="image" size={18} color={Colors.light.tintBlue} />
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={[styles.userSendBtn, !userPanelDraft.trim() && styles.userSendBtnDisabled]}
+                    onPress={handleSendUserMessage}
+                    disabled={!userPanelDraft.trim()}
+                  >
+                    <Feather name="send" size={14} color="#fff" />
+                    <Text style={styles.userSendBtnText}>Senden</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            </Animated.View>
+          </>
+        )}
+        </Animated.View>
+      </Pressable>
+
+      {/* User photo modal */}
+      <Modal visible={userMediaModalOpen} transparent animationType="slide" onRequestClose={() => setUserMediaModalOpen(false)}>
+        <Pressable style={styles.uMediaOverlay} onPress={() => setUserMediaModalOpen(false)}>
+          <Pressable style={[styles.uMediaSheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.uMediaHandle} />
+            <Text style={styles.uMediaTitle}>Foto senden an {selectedMapUser?.name}</Text>
+            <Pressable style={({ pressed }) => [styles.uMediaOption, { opacity: pressed ? 0.75 : 1 }]} onPress={handleUserTakePhoto}>
+              <View style={[styles.uMediaOptionIcon, { backgroundColor: Colors.light.tint }]}>
+                <Feather name="camera" size={22} color="#fff" />
+              </View>
+              <View>
+                <Text style={styles.uMediaOptionLabel}>Foto aufnehmen</Text>
+                <Text style={styles.uMediaOptionSub}>Kamera öffnen</Text>
+              </View>
+            </Pressable>
+            <Pressable style={({ pressed }) => [styles.uMediaOption, { opacity: pressed ? 0.75 : 1 }]} onPress={handleUserPickImage}>
+              <View style={[styles.uMediaOptionIcon, { backgroundColor: Colors.light.tintBlue }]}>
+                <Feather name="image" size={22} color="#fff" />
+              </View>
+              <View>
+                <Text style={styles.uMediaOptionLabel}>Aus Galerie wählen</Text>
+                <Text style={styles.uMediaOptionSub}>Foto aus der Bibliothek</Text>
+              </View>
+            </Pressable>
+            <Pressable style={({ pressed }) => [styles.uMediaCancelBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => setUserMediaModalOpen(false)}>
+              <Text style={styles.uMediaCancelText}>Abbrechen</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -3062,13 +3531,96 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.backgroundTertiary,
   },
   memberOptionName: {
-    flex: 1,
     fontSize: 12,
     fontWeight: "700",
     color: Colors.light.textSecondary,
   },
+  memberOptionSub: {
+    fontSize: 10,
+    color: Colors.light.textTertiary,
+    fontWeight: "500",
+  },
+  partyLocationRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  currentLocationBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
+    backgroundColor: Colors.light.backgroundSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  currentLocationBtnText: {
+    fontSize: 18,
+  },
   memberOptionNameSelected: {
     color: partyAccent,
+  },
+  myPartyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: partyAccentSoft,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: partyAccent + "55",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  myPartyCardEmoji: {
+    fontSize: 20,
+  },
+  myPartyCardName: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: partyAccent,
+  },
+  myPartyCardSub: {
+    fontSize: 11,
+    color: Colors.light.textSecondary,
+    fontWeight: "500",
+  },
+  partyDropdown: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
+    backgroundColor: Colors.light.background,
+    overflow: "hidden",
+  },
+  partyDropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  partyDropdownText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: Colors.light.text,
+  },
+  partyDropdownDivider: {
+    height: 1,
+    backgroundColor: Colors.light.separator,
+    marginHorizontal: 14,
+  },
+  partyBackRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 2,
+  },
+  partyBackText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: Colors.light.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   partyCreateButton: {
     height: 38,
@@ -3078,6 +3630,9 @@ const styles = StyleSheet.create({
     borderColor: mapPanelBorder,
     alignItems: "center",
     justifyContent: "center",
+    marginHorizontal: 12,
+    marginTop: 10,
+    marginBottom: 4,
   },
   partyCreateButtonText: {
     color: "#fff",
@@ -3134,4 +3689,137 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 18, fontWeight: "700", color: Colors.light.text, textAlign: "center" },
   emptyText: { fontSize: 14, color: Colors.light.textSecondary, textAlign: "center", lineHeight: 20 },
+
+  // ── User Detail Panel ────────────────────────────────────────────────────────
+  userPanelOverlay: {
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 20,
+    backgroundColor: "rgba(0,0,0,0.15)",
+  },
+  userDetailPanel: {
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: mapPanelBackground,
+    overflow: "hidden",
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+    shadowColor: mapPanelShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 12,
+  },
+  userDetailHeader: {
+    height: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    backgroundColor: isNeonMapStyle ? "rgba(0,240,255,0.10)" : Colors.light.backgroundSecondary,
+    borderBottomWidth: Colors.shape.borderWidthThin,
+    borderBottomColor: mapPanelBorder,
+  },
+  userDetailAvatar: {
+    width: 38, height: 38,
+    borderRadius: isNeonMapStyle ? Colors.shape.radiusSm : 19,
+    borderWidth: 1,
+    borderColor: Colors.light.tintBlue,
+    backgroundColor: Colors.light.backgroundSecondary,
+  },
+  userDetailHeaderText: { flex: 1, minWidth: 0 },
+  userDetailName: { fontSize: 14, fontWeight: "800", color: Colors.light.text },
+  userDetailSubtitle: { fontSize: 11, fontWeight: "600", color: Colors.light.tintBlue, marginTop: 2 },
+  userDetailCloseBtn: {
+    width: 30, height: 30,
+    alignItems: "center", justifyContent: "center",
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: Colors.light.backgroundSecondary,
+  },
+  userDetailBody: { flex: 1 },
+  userDetailScroll: { padding: 12, gap: 10 },
+  userActivityCard: {
+    padding: 10,
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: isNeonMapStyle ? "rgba(0,240,255,0.07)" : Colors.light.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: isNeonMapStyle ? Colors.light.tintBlue : Colors.light.separator,
+  },
+  userActivityCardLabel: {
+    fontSize: 10, fontWeight: "700",
+    color: Colors.light.textTertiary,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  userActivityCardText: { fontSize: 13, fontWeight: "600", color: Colors.light.tintBlue },
+  friendRequestBtn: {
+    height: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: Colors.light.tint,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+  },
+  friendRequestBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  userMessageInput: {
+    minHeight: 72, maxHeight: 110,
+    borderRadius: Colors.shape.radiusSm,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
+    backgroundColor: Colors.light.backgroundSecondary,
+    paddingHorizontal: 12, paddingVertical: 8,
+    fontSize: 14, color: Colors.light.text,
+  },
+  userActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    justifyContent: "flex-end",
+  },
+  userMediaBtn: {
+    width: 42, height: 42,
+    alignItems: "center", justifyContent: "center",
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: Colors.light.separator,
+  },
+  userSendBtn: {
+    flex: 1, height: 42,
+    flexDirection: "row",
+    alignItems: "center", justifyContent: "center",
+    gap: 6,
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: Colors.light.tint,
+    borderWidth: Colors.shape.borderWidthThin,
+    borderColor: mapPanelBorder,
+  },
+  userSendBtnDisabled: { opacity: 0.38 },
+  userSendBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+
+  // ── User photo modal ──────────────────────────────────────────────────────────
+  uMediaOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.45)" },
+  uMediaSheet: {
+    backgroundColor: Colors.light.background,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingTop: 12, paddingHorizontal: 20, gap: 12,
+    borderTopWidth: 3, borderTopColor: Colors.light.text,
+  },
+  uMediaHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.light.separator, alignSelf: "center", marginBottom: 8 },
+  uMediaTitle: { fontSize: 17, fontWeight: "700", color: Colors.light.text, marginBottom: 4 },
+  uMediaOption: {
+    flexDirection: "row", alignItems: "center", gap: 16,
+    paddingVertical: 14, paddingHorizontal: 16,
+    borderRadius: Colors.shape.radiusSm,
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.text,
+  },
+  uMediaOptionIcon: { width: 48, height: 48, borderRadius: Colors.shape.radiusSm, alignItems: "center", justifyContent: "center" },
+  uMediaOptionLabel: { fontSize: 15, fontWeight: "700", color: Colors.light.text },
+  uMediaOptionSub: { fontSize: 12, color: Colors.light.textSecondary, marginTop: 2 },
+  uMediaCancelBtn: { alignItems: "center", paddingVertical: 14 },
+  uMediaCancelText: { fontSize: 15, color: Colors.light.textSecondary, fontWeight: "500" },
 });
