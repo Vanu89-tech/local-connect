@@ -5,27 +5,37 @@ Stand: 2026-05-25
 ## Wichtigster Kontext
 
 Wir bauen die iOS/Expo-App "Locals" in `/Users/razvan/Desktop/Local-Connect/artifacts/mobile`.
+Der sichtbare App-Name ist `Locals`.
 Der User möchte iterativ im Simulator testen und Features direkt weiterentwickeln.
 
 ## Simulator
 
 - iPhone 17 (iOS 26.5), UDID: `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`
+- Dieser iPhone 17 ist ab jetzt der feste Standard-Simulator fuer Locals und fuer `/simulation`.
 - App Bundle ID: `com.localconnect.app`
 - App starten: `xcrun simctl launch "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" "com.localconnect.app"`
 - Screenshot: `xcrun simctl io "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" screenshot /tmp/s.png`
-- Hinweis: App nutzt eingebetteten JS-Bundle. Dev-Client Deep-Link (`exp+locals://`) funktioniert nicht.
-  Für JS-Änderungen sichtbar: App neu bauen (`expo run:ios --device`).
+- Hinweis: App als Dev-Build mit Metro starten/verbinden. Fuer native Aenderungen sichtbar: App neu bauen mit `pnpm exec expo run:ios --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
+- Fuer normales Starten per App-Icon im Simulator: `pnpm exec expo run:ios --configuration Release --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`. Danach braucht die App kein Metro.
 
 ## Aktueller Fokus
 
-Aktueller unmittelbarer naechster Schritt: nativer iOS-Rebuild, damit das neu implementierte App-Icon auf dem Simulator/Home-Screen sichtbar wird.
+Aktueller unmittelbarer naechster Schritt: neue Chat-Migration ausfuehren und Messenger im Simulator testen.
 
 ```bash
 cd /Users/razvan/Desktop/Local-Connect/artifacts/mobile
-pnpm exec expo run:ios
+pnpm exec expo run:ios --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF
 ```
 
-Grund: `artifacts/mobile/assets/images/icon.png` und `splash-icon.png` wurden ersetzt. Metro/Fast Refresh reicht fuer App-Icon-Aenderungen nicht.
+Grund: Der User moechte, dass ab jetzt alles auf dem vorherigen iPhone 17 Simulator laeuft.
+
+Neue Chat-Migration:
+
+```bash
+/Users/razvan/Desktop/Local-Connect/supabase/migrations/20260528090000_chat_reliability_security.sql
+```
+
+Sie ergaenzt `chat_messages` um Client-IDs, Status, Receipts, Attachments, Block/Report-Basics und den `chat-images` Storage Bucket.
 
 ## Zuletzt erledigt (2026-05-25) — aktuelle Session
 
@@ -43,7 +53,7 @@ Grund: `artifacts/mobile/assets/images/icon.png` und `splash-icon.png` wurden er
 - Implementiert als:
   - `artifacts/mobile/assets/images/icon.png`
   - `artifacts/mobile/assets/images/splash-icon.png`
-- Naechster Schritt: nativer iOS-Rebuild, um Icon sichtbar zu machen.
+- Nativer iOS-Rebuild auf festem iPhone 17 Simulator erledigt.
 
 ## Zuletzt erledigt (2026-05-25) — Session 4
 

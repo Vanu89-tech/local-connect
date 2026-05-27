@@ -135,10 +135,10 @@ export default function LocationSetupScreen() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={Colors.light.onPrimary} />
             ) : (
               <View style={styles.btnInner}>
-                <Feather name="navigation" size={17} color="#fff" />
+                <Feather name="navigation" size={17} color={Colors.light.onPrimary} />
                 <Text style={styles.primaryBtnText}>
                   Live-Standort aktivieren
                 </Text>
@@ -244,7 +244,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 10,
-    backgroundColor: "#F0FAFA",
+    backgroundColor: Colors.light.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: Colors.light.separator,
     borderRadius: 12,
     padding: 14,
     marginBottom: 32,
@@ -260,7 +262,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   primaryBtn: {
-    backgroundColor: Colors.light.primary,
+    backgroundColor: Colors.light.tint,
+    borderWidth: 1,
+    borderColor: Colors.light.tintBlue,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
@@ -273,7 +277,7 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: "#fff",
+    color: Colors.light.onPrimary,
   },
   secondaryBtn: {
     backgroundColor: Colors.light.backgroundSecondary,

@@ -293,7 +293,16 @@ function nowTime() {
 
 // ── Main screen ──────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const { currentUser, posts, parties, groups, mapFriends, localMessages, addLocalMessage } = useApp();
+  const {
+    currentUser,
+    posts,
+    parties,
+    groups,
+    mapFriends,
+    localMessages,
+    addLocalMessage,
+    markThreadRead,
+  } = useApp();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
@@ -343,6 +352,10 @@ export default function HomeScreen() {
     setSelectedId((cur) => (threads.some((t) => t.id === cur) ? cur : threads[0].id));
   }, [threads]);
 
+  useEffect(() => {
+    if (!selectedThread) return;
+    void markThreadRead(selectedThread.id);
+  }, [markThreadRead, selectedThread]);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     if (!selectedThread) return;
@@ -353,9 +366,17 @@ export default function HomeScreen() {
   const handleSend = useCallback(() => {
     if (!draft.trim() || !selectedThread) return;
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    addMessage({ id: `local-${Date.now()}`, senderId: "me", text: draft.trim(), time: nowTime() });
+    const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    addMessage({
+      id: clientMessageId,
+      clientMessageId,
+      senderId: currentUser.id,
+      text: draft.trim(),
+      time: nowTime(),
+      createdAt: new Date().toISOString(),
+    });
     setDraft("");
-  }, [draft, selectedThread, addMessage]);
+  }, [addMessage, currentUser.id, draft, selectedThread]);
 
   const handleEmojiSelect = useCallback((emoji: string) => {
     setDraft((d) => d + emoji);
@@ -375,9 +396,18 @@ export default function HomeScreen() {
     });
     if (!result.canceled && result.assets[0]?.uri) {
       if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      addMessage({ id: `img-${Date.now()}`, senderId: "me", text: "", time: nowTime(), imageUri: result.assets[0].uri });
+      const clientMessageId = `client-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      addMessage({
+        id: clientMessageId,
+        clientMessageId,
+        senderId: currentUser.id,
+        text: "",
+        time: nowTime(),
+        createdAt: new Date().toISOString(),
+        imageUri: result.assets[0].uri,
+      });
     }
-  }, [addMessage]);
+  }, [addMessage, currentUser.id]);
 
   const handleTakePhoto = useCallback(async () => {
     setMediaModalOpen(false);
@@ -389,9 +419,18 @@ export default function HomeScreen() {
     });
     if (!result.canceled && result.assets[0]?.uri) {
       if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      addMessage({ id: `cam-${Date.now()}`, senderId: "me", text: "", time: nowTime(), imageUri: result.assets[0].uri });
+      const clientMessageId = `client-cam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      addMessage({
+        id: clientMessageId,
+        clientMessageId,
+        senderId: currentUser.id,
+        text: "",
+        time: nowTime(),
+        createdAt: new Date().toISOString(),
+        imageUri: result.assets[0].uri,
+      });
     }
-  }, [addMessage]);
+  }, [addMessage, currentUser.id]);
 
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -406,7 +445,16 @@ export default function HomeScreen() {
   }, []);
 
   const allMessages = useMemo(
-    () => [...(selectedThread?.messages ?? []), ...(localMessages[selectedThread?.id ?? ""] ?? [])],
+    () => {
+      const messages = [...(selectedThread?.messages ?? []), ...(localMessages[selectedThread?.id ?? ""] ?? [])];
+      const byKey = new Map<string, ChatMessage>();
+      messages.forEach((message) => byKey.set(message.clientMessageId ?? message.id, message));
+      return Array.from(byKey.values()).sort((a, b) => {
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return aTime - bTime;
+      });
+    },
     [selectedThread, localMessages],
   );
 
@@ -474,9 +522,21 @@ export default function HomeScreen() {
           >
             {allMessages.map((message) => {
               const mine = message.senderId === currentUser.id || message.senderId === "me";
+              const statusLabel =
+                mine && message.status === "sending"
+                  ? " · sendet"
+                  : mine && message.status === "failed"
+                    ? " · fehlgeschlagen"
+                    : mine && message.status === "read"
+                      ? " · gelesen"
+                      : mine && message.status === "delivered"
+                        ? " · zugestellt"
+                        : mine && message.status === "sent"
+                          ? " · gesendet"
+                          : "";
               return (
                 <View key={message.id} style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowTheirs]}>
-                  <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+                  <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs, message.status === "failed" && styles.bubbleFailed]}>
                     {message.imageUri ? (
                       <>
                         <Image source={{ uri: message.imageUri }} style={styles.messageImage} contentFit="cover" />
@@ -485,7 +545,12 @@ export default function HomeScreen() {
                     ) : (
                       <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextTheirs]}>{message.text}</Text>
                     )}
-                    <Text style={[styles.messageTime, mine ? styles.messageTimeMine : styles.messageTimeTheirs]}>{message.time}</Text>
+                    <Text style={[styles.messageTime, mine ? styles.messageTimeMine : styles.messageTimeTheirs, message.status === "failed" && styles.messageFailedText]}>
+                      {message.time}{statusLabel}
+                    </Text>
+                    {message.status === "failed" && message.failedReason ? (
+                      <Text style={styles.messageFailedReason} numberOfLines={2}>{message.failedReason}</Text>
+                    ) : null}
                   </View>
                 </View>
               );
@@ -690,6 +755,7 @@ const styles = StyleSheet.create({
   },
   bubbleMine: { backgroundColor: Colors.light.tint },
   bubbleTheirs: { backgroundColor: Colors.light.tintBlue },
+  bubbleFailed: { backgroundColor: "#FF375F", opacity: 0.92 },
   messageImage: { width: 200, height: 160, borderRadius: 8, marginBottom: 4 },
   messageText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
   messageTextMine: { color: "#FFFFFF" },
@@ -697,6 +763,14 @@ const styles = StyleSheet.create({
   messageTime: { marginTop: 5, fontSize: 10, fontFamily: "Inter_500Medium", alignSelf: "flex-end" },
   messageTimeMine: { color: "rgba(255,255,255,0.72)" },
   messageTimeTheirs: { color: Colors.light.textTertiary },
+  messageFailedText: { color: "rgba(255,255,255,0.9)" },
+  messageFailedReason: {
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 14,
+    fontFamily: "Inter_500Medium",
+    color: "rgba(255,255,255,0.9)",
+  },
 
   composer: {
     paddingHorizontal: 14, paddingTop: 10,

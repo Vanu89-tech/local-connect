@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { AppState } from "react-native";
 
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -68,12 +69,20 @@ export type Comment = {
   createdAt: string;
 };
 
+export type ChatMessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
+
 export type ChatMessage = {
   id: string;
   senderId: string;
   text: string;
   time: string;
+  clientMessageId?: string;
   imageUri?: string;
+  createdAt?: string;
+  status?: ChatMessageStatus;
+  deliveredAt?: string;
+  readAt?: string;
+  failedReason?: string;
 };
 
 export type MapFriend = {
@@ -307,6 +316,8 @@ type AppContextType = {
   setMapFriends: (friends: MapFriend[]) => void;
   localMessages: Record<string, ChatMessage[]>;
   addLocalMessage: (threadId: string, msg: ChatMessage) => void;
+  markThreadRead: (threadId: string) => Promise<void>;
+  refreshSocialThreads: () => Promise<void>;
   refreshPosts: () => Promise<void>;
   addPost: (
     content: string,
@@ -395,6 +406,10 @@ type ChatMessageRow = {
   text: string;
   image_url: string | null;
   created_at: string;
+  client_message_id?: string | null;
+  status?: ChatMessageStatus | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
 };
 
 type SupabaseErrorLike = {
@@ -423,6 +438,73 @@ function makeLocalUuid(): string {
     const value = char === "x" ? rand : (rand & 0x3) | 0x8;
     return value.toString(16);
   });
+}
+
+function formatMessageTime(iso: string): string {
+  const created = new Date(iso);
+  return `${created.getHours().toString().padStart(2, "0")}:${created
+    .getMinutes()
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+function compareMessagesByCreatedAt(a: ChatMessage, b: ChatMessage): number {
+  const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+  const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+  return aTime - bTime;
+}
+
+function dedupeMessages(messages: ChatMessage[]): ChatMessage[] {
+  const byKey = new Map<string, ChatMessage>();
+  messages.forEach((message) => {
+    const key = message.clientMessageId ?? message.id;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, message);
+      return;
+    }
+    byKey.set(key, {
+      ...existing,
+      ...message,
+      status:
+        message.status === "failed"
+          ? existing.status
+          : message.status ?? existing.status,
+    });
+  });
+  return Array.from(byKey.values()).sort(compareMessagesByCreatedAt);
+}
+
+function mapChatMessageRow(message: ChatMessageRow): ChatMessage {
+  return {
+    id: message.id,
+    senderId: message.sender_id,
+    text: message.text,
+    time: formatMessageTime(message.created_at),
+    clientMessageId: message.client_message_id ?? undefined,
+    imageUri: message.image_url ?? undefined,
+    createdAt: message.created_at,
+    status: message.status ?? "sent",
+    deliveredAt: message.delivered_at ?? undefined,
+    readAt: message.read_at ?? undefined,
+  };
+}
+
+function hasMissingChatReliabilityColumns(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as SupabaseErrorLike).code;
+  const message = (error as SupabaseErrorLike).message;
+  return code === "42703" && typeof message === "string" && message.includes("chat_messages");
+}
+
+function isMissingChatReliabilitySchema(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as SupabaseErrorLike).code;
+  return code === "42703" || code === "42P01";
+}
+
+function isRemoteImageUri(uri: string | undefined): boolean {
+  return !!uri && /^https?:\/\//i.test(uri);
 }
 
 function isUuid(value: string): boolean {
@@ -498,23 +580,129 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
   const [hydrated, setHydrated] = useState(false);
 
-  const addLocalMessage = useCallback((threadId: string, msg: ChatMessage) => {
+  const mergeThreadMessages = useCallback((threadId: string, messages: ChatMessage[]) => {
     setLocalMessages((prev) => ({
       ...prev,
-      [threadId]: [...(prev[threadId] ?? []), msg],
+      [threadId]: dedupeMessages([...(prev[threadId] ?? []), ...messages]),
+    }));
+  }, []);
+
+  const updateMessageStatus = useCallback(
+    (threadId: string, messageKey: string, patch: Partial<ChatMessage>) => {
+      setLocalMessages((prev) => ({
+        ...prev,
+        [threadId]: (prev[threadId] ?? []).map((message) =>
+          message.id === messageKey || message.clientMessageId === messageKey
+            ? { ...message, ...patch }
+            : message,
+        ),
+      }));
+    },
+    [],
+  );
+
+  const uploadChatImage = useCallback(
+    async (imageUri: string | undefined, clientMessageId: string): Promise<string | undefined> => {
+      if (!imageUri || isRemoteImageUri(imageUri) || !user) return imageUri;
+
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      const mimeType = blob.type || "image/jpeg";
+      const extension =
+        mimeType === "image/png"
+          ? "png"
+          : mimeType === "image/heic"
+            ? "heic"
+            : mimeType === "image/webp"
+              ? "webp"
+              : "jpg";
+      const filePath = `${user.id}/${clientMessageId}.${extension}`;
+
+      const { error } = await supabase.storage.from("chat-images").upload(filePath, blob, {
+        contentType: mimeType,
+        upsert: false,
+      });
+      if (error) throw error;
+
+      const { data } = supabase.storage.from("chat-images").getPublicUrl(filePath);
+      return data.publicUrl;
+    },
+    [user],
+  );
+
+  const addLocalMessage = useCallback((threadId: string, msg: ChatMessage) => {
+    const now = new Date().toISOString();
+    const clientMessageId = msg.clientMessageId ?? (isUuid(msg.id) ? `client-${msg.id}` : msg.id);
+    const optimisticMessage: ChatMessage = {
+      ...msg,
+      id: msg.id || clientMessageId,
+      clientMessageId,
+      createdAt: msg.createdAt ?? now,
+      time: msg.time || formatMessageTime(now),
+      status: user ? "sending" : "sent",
+    };
+
+    setLocalMessages((prev) => ({
+      ...prev,
+      [threadId]: dedupeMessages([...(prev[threadId] ?? []), optimisticMessage]),
     }));
     if (!user) return;
     const [threadType, rawThreadId] = threadId.split(":");
-    if ((threadType !== "group" && threadType !== "party") || !isUuid(rawThreadId)) return;
-    void supabase.from("chat_messages").insert({
-      id: isUuid(msg.id) ? msg.id : makeLocalUuid(),
-      thread_type: threadType,
-      thread_id: rawThreadId,
-      sender_id: user.id,
-      text: msg.text,
-      image_url: msg.imageUri ?? null,
-    });
-  }, [user]);
+    if ((threadType !== "group" && threadType !== "party") || !isUuid(rawThreadId)) {
+      updateMessageStatus(threadId, clientMessageId, { status: "sent" });
+      return;
+    }
+
+    void (async () => {
+      try {
+        const remoteImageUrl = await uploadChatImage(msg.imageUri, clientMessageId);
+        const messageId = isUuid(msg.id) ? msg.id : makeLocalUuid();
+        const insertPayload = {
+          id: messageId,
+          thread_type: threadType,
+          thread_id: rawThreadId,
+          sender_id: user.id,
+          text: msg.text,
+          image_url: remoteImageUrl ?? null,
+          client_message_id: clientMessageId,
+          message_type: remoteImageUrl ? "image" : "text",
+          status: "sent",
+        };
+
+        const { data, error } = await supabase
+          .from("chat_messages")
+          .insert(insertPayload)
+          .select("id, thread_type, thread_id, sender_id, text, image_url, created_at, client_message_id, status, delivered_at, read_at")
+          .single<ChatMessageRow>();
+
+        if (error) {
+          if (!hasMissingChatReliabilityColumns(error)) throw error;
+          const { data: legacyData, error: legacyError } = await supabase
+            .from("chat_messages")
+            .insert({
+              id: messageId,
+              thread_type: threadType,
+              thread_id: rawThreadId,
+              sender_id: user.id,
+              text: msg.text,
+              image_url: remoteImageUrl ?? null,
+            })
+            .select("id, thread_type, thread_id, sender_id, text, image_url, created_at")
+            .single<ChatMessageRow>();
+          if (legacyError) throw legacyError;
+          mergeThreadMessages(threadId, [{ ...mapChatMessageRow(legacyData), clientMessageId }]);
+          return;
+        }
+
+        if (data) mergeThreadMessages(threadId, [mapChatMessageRow(data)]);
+      } catch (error) {
+        updateMessageStatus(threadId, clientMessageId, {
+          status: "failed",
+          failedReason: error instanceof Error ? error.message : "Nachricht konnte nicht gesendet werden.",
+        });
+      }
+    })();
+  }, [mergeThreadMessages, updateMessageStatus, uploadChatImage, user]);
 
   useEffect(() => {
     loadData();
@@ -729,30 +917,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...partyIds.map((id) => `and(thread_type.eq.party,thread_id.eq.${id})`),
     ];
     if (threadFilters.length) {
-      const { data: messageRows } = await supabase
+      let messageRows: ChatMessageRow[] | null = null;
+      const { data, error } = await supabase
         .from("chat_messages")
-        .select("id, thread_type, thread_id, sender_id, text, image_url, created_at")
+        .select("id, thread_type, thread_id, sender_id, text, image_url, created_at, client_message_id, status, delivered_at, read_at")
         .or(threadFilters.join(","))
         .order("created_at", { ascending: true })
         .returns<ChatMessageRow[]>();
 
+      if (error) {
+        if (!hasMissingChatReliabilityColumns(error)) {
+          console.warn("chat messages refresh failed", error.message);
+        } else {
+          const { data: legacyData, error: legacyError } = await supabase
+            .from("chat_messages")
+            .select("id, thread_type, thread_id, sender_id, text, image_url, created_at")
+            .or(threadFilters.join(","))
+            .order("created_at", { ascending: true })
+            .returns<ChatMessageRow[]>();
+          if (legacyError) console.warn("legacy chat messages refresh failed", legacyError.message);
+          messageRows = legacyData;
+        }
+      } else {
+        messageRows = data;
+      }
+
       const nextMessages: Record<string, ChatMessage[]> = {};
       (messageRows ?? []).forEach((message) => {
         const key = `${message.thread_type}:${message.thread_id}`;
-        const created = new Date(message.created_at);
-        const time = `${created.getHours().toString().padStart(2, "0")}:${created.getMinutes().toString().padStart(2, "0")}`;
         nextMessages[key] = [
           ...(nextMessages[key] ?? []),
-          {
-            id: message.id,
-            senderId: message.sender_id,
-            text: message.text,
-            time,
-            imageUri: message.image_url ?? undefined,
-          },
+          mapChatMessageRow(message),
         ];
       });
-      setLocalMessages((prev) => ({ ...prev, ...nextMessages }));
+      setLocalMessages((prev) => {
+        const merged = { ...prev };
+        Object.entries(nextMessages).forEach(([threadId, messages]) => {
+          merged[threadId] = dedupeMessages([...(prev[threadId] ?? []), ...messages]);
+        });
+        return merged;
+      });
     }
   }, [user]);
 
@@ -761,9 +965,68 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void refreshSocialThreads();
     const interval = setInterval(() => {
       void refreshSocialThreads();
-    }, 20000);
+    }, 60000);
     return () => clearInterval(interval);
   }, [refreshSocialThreads, user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`locals-chat-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_messages" },
+        (payload) => {
+          const row = payload.new as ChatMessageRow;
+          if (!row.thread_type || !row.thread_id) return;
+          mergeThreadMessages(`${row.thread_type}:${row.thread_id}`, [mapChatMessageRow(row)]);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [mergeThreadMessages, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshSocialThreads();
+    });
+    return () => subscription.remove();
+  }, [refreshSocialThreads, user]);
+
+  const markThreadRead = useCallback(async (threadId: string) => {
+    if (!user) return;
+    const unreadMessages = (localMessages[threadId] ?? []).filter(
+      (message) => message.senderId !== user.id && isUuid(message.id) && !message.readAt,
+    );
+    if (!unreadMessages.length) return;
+
+    const readAt = new Date().toISOString();
+    setLocalMessages((prev) => ({
+      ...prev,
+      [threadId]: (prev[threadId] ?? []).map((message) =>
+        unreadMessages.some((unread) => unread.id === message.id)
+          ? { ...message, status: "read", readAt }
+          : message,
+      ),
+    }));
+
+    const receiptRows = unreadMessages.map((message) => ({
+      message_id: message.id,
+      profile_id: user.id,
+      delivered_at: message.deliveredAt ?? readAt,
+      read_at: readAt,
+    }));
+
+    const { error } = await supabase.from("message_receipts").upsert(receiptRows);
+    if (error && !isMissingChatReliabilitySchema(error)) {
+      console.warn("message receipts update failed", error.message);
+    }
+  }, [localMessages, user]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -1253,6 +1516,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setMapFriends,
       localMessages,
       addLocalMessage,
+      markThreadRead,
+      refreshSocialThreads,
       refreshPosts,
       addPost,
       deletePost,
@@ -1279,6 +1544,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setMapFriends,
       localMessages,
       addLocalMessage,
+      markThreadRead,
+      refreshSocialThreads,
       refreshPosts,
       addPost,
       deletePost,

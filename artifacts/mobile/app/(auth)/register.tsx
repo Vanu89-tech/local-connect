@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
   },
   inputFocused: {
-    borderColor: Colors.light.primary,
+    borderColor: Colors.light.tintBlue,
     backgroundColor: Colors.light.background,
   },
   atSign: {
@@ -266,7 +266,9 @@ const styles = StyleSheet.create({
     color: Colors.light.text,
   },
   primaryBtn: {
-    backgroundColor: Colors.light.primary,
+    backgroundColor: Colors.light.tint,
+    borderWidth: 1,
+    borderColor: Colors.light.tintBlue,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
@@ -278,7 +280,7 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+    color: Colors.light.onPrimary,
   },
   terms: {
     fontSize: 12,

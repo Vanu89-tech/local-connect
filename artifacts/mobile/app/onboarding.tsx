@@ -193,15 +193,17 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
   },
   primaryBtn: {
-    backgroundColor: Colors.light.primary,
+    backgroundColor: Colors.light.tint,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.light.tintBlue,
   },
   primaryBtnText: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+    color: Colors.light.onPrimary,
   },
   secondaryBtn: {
     backgroundColor: Colors.light.backgroundSecondary,

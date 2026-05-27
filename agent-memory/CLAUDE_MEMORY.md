@@ -4,6 +4,10 @@ Quelle: `.claude/projects/-Users-razvan-Downloads-Local-Connect/memory/MEMORY.md
 
 # Local-Connect Projekt
 
+Sichtbarer App-Name: `Locals`.
+Messenger-Fundament: Optimistic Sending, Sendestatus, Realtime-Dedupe, App-Fokus-Resync und Chat-Safety-Migration sind angelegt. Neue Supabase-Migration: `supabase/migrations/20260528090000_chat_reliability_security.sql`.
+Icon-Start im Simulator funktioniert mit Release-Build: `pnpm exec expo run:ios --configuration Release --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
+
 ## Überblick
 
 Hyper-lokale Social App "Locals" — Nutzer sehen was in ihrer Nähe passiert, verbinden sich mit Menschen in der Stadt.
@@ -84,3 +88,4 @@ Danach pruefen:
 - Kommunikation auf Deutsch
 - App-Name: "Locals"
 - Der User arbeitet im iPhone Simulator und möchte schnell zwischen Codex und Claude Code wechseln können.
+- Locals soll standardmaessig auf dem vorherigen iPhone 17 Simulator laufen: UDID `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.

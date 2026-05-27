@@ -6,7 +6,11 @@ Stand: 2026-05-25
 
 Locals ist eine Expo React Native iOS-App mit Supabase Auth/Backend, Kartenmodus, Messenger-Tab, Party-Funktionen, Startmodus `Online`/`Daheim`, Geofencing-Idee und austauschbarem Grafikstil-System.
 
-Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator.
+Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator. Ab jetzt soll die Locals-App standardmaessig auf dem vorherigen iPhone 17 Simulator laufen: UDID `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
+- App-Name fuer Nutzer: `Locals`.
+- Messenger-Fundament gestartet: Optimistic Sending, Sendestatus, Realtime-Dedupe, App-Fokus-Resync und Chat-Bilder via `chat-images`.
+- Neue Supabase-Migration ausfuehren: `supabase/migrations/20260528090000_chat_reliability_security.sql`.
+- Fuer Start direkt ueber App-Icon im Simulator: Release-Build installieren mit `pnpm exec expo run:ios --configuration Release --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`. Das eingebettete JS-Bundle startet ohne Metro.
 
 ## Projektpfade
 
@@ -33,14 +37,15 @@ Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator.
 - Aktueller Grafikstil ist `neon`.
 - Gruppen- und Partymechanik ist app-weit im `AppContext` verdrahtet.
 - Supabase-Migration fuer `groups`, `group_members` und `chat_messages` wurde erstellt und vom User in Supabase ausgefuehrt.
+- Supabase-Migration fuer Chat-Zuverlaessigkeit/Sicherheit wurde erstellt: `supabase/migrations/20260528090000_chat_reliability_security.sql`.
 - Neues App-Icon wurde aus der gewaehlten Logo-Variante 3 umgesetzt:
   - `artifacts/mobile/assets/images/icon.png`
   - `artifacts/mobile/assets/images/splash-icon.png`
-- Naechster wichtiger Schritt: nativer iOS-Rebuild, damit das neue App-Icon auf dem Simulator/Home-Screen sichtbar wird.
+- Naechster wichtiger Schritt: neue Chat-Migration in Supabase ausfuehren und Messenger im Simulator testen.
 
 ## Naechster wichtiger Schritt
 
-Native iOS-App neu bauen/installieren, weil App-Icon-Assets nicht per Metro/Fast Refresh auf dem Homescreen aktualisiert werden.
+Neue Chat-Migration in Supabase ausfuehren: `supabase/migrations/20260528090000_chat_reliability_security.sql`.
 
 Empfohlener Befehl:
 
@@ -52,6 +57,7 @@ pnpm exec expo run:ios
 Danach pruefen:
 
 - iPhone Simulator zeigt neues Locals-App-Icon.
+- Standard-Simulator fuer Locals: iPhone 17, UDID `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
 - Splash-Icon ist aktualisiert.
 - App startet weiterhin mit Supabase-Verbindung.
 
@@ -105,12 +111,12 @@ pnpm exec expo start --dev-client --host localhost
 <!-- APP_SYNC_STATUS_START -->
 ## Letzter Sync
 
-- Timestamp UTC: 20260525T204258Z
+- Timestamp UTC: 20260527T234732Z
 - Projekt: Local-Connect
 - Branch: master
-- Commit vor Sync: b0706c6
-- Lokale Änderungen vor Memory-Update: 13
-- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260525T204258Z
+- Commit vor Sync: e83fe2d
+- Lokale Änderungen vor Memory-Update: 11
+- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260527T234732Z
 - Hinweis: Dieser Block wird automatisch von /sync aktualisiert.
 
 ### Geänderte Dateien vor Sync
@@ -118,14 +124,12 @@ pnpm exec expo start --dev-client --host localhost
 - ` M agent-memory/CLAUDE_MEMORY.md`
 - ` M agent-memory/CODEX_HANDOFF.md`
 - ` M agent-memory/CURRENT_STATE.md`
-- ` M artifacts/mobile/app/(tabs)/_layout.tsx`
+- ` M artifacts/mobile/app.json`
+- ` M artifacts/mobile/app/(auth)/login.tsx`
+- ` M artifacts/mobile/app/(auth)/register.tsx`
 - ` M artifacts/mobile/app/(tabs)/index.tsx`
-- ` M artifacts/mobile/app/(tabs)/map.tsx`
-- ` M artifacts/mobile/app/(tabs)/profile.tsx`
-- ` M artifacts/mobile/app/presence-choice.tsx`
-- ` M artifacts/mobile/assets/images/icon.png`
-- ` M artifacts/mobile/assets/images/splash-icon.png`
-- ` M artifacts/mobile/constants/graphicStyles.ts`
+- ` M artifacts/mobile/app/location-setup.tsx`
+- ` M artifacts/mobile/app/onboarding.tsx`
 - ` M artifacts/mobile/context/AppContext.tsx`
-- `?? supabase/migrations/20260525190000_groups_parties_messages.sql`
+- `?? supabase/migrations/20260528090000_chat_reliability_security.sql`
 <!-- APP_SYNC_STATUS_END -->
