@@ -1,6 +1,6 @@
 # Codex Handoff
 
-Stand: 2026-05-25
+Stand: 2026-05-28
 
 ## Wichtigster Kontext
 
@@ -10,32 +10,58 @@ Der User möchte iterativ im Simulator testen und Features direkt weiterentwicke
 
 ## Simulator
 
-- iPhone 17 (iOS 26.5), UDID: `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`
-- Dieser iPhone 17 ist ab jetzt der feste Standard-Simulator fuer Locals und fuer `/simulation`.
+- **DER einzige Simulator fuer Locals: iPhone 17 (iOS 26.5), UDID: `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`**
+- Es gibt mehrere iPhone-17-Simulatoren auf dem System — NUR dieser hat die App installiert. Immer diesen nehmen.
 - App Bundle ID: `com.localconnect.app`
+- Simulator booten (falls Shutdown): `xcrun simctl boot "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" && open -a Simulator`
 - App starten: `xcrun simctl launch "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" "com.localconnect.app"`
 - Screenshot: `xcrun simctl io "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" screenshot /tmp/s.png`
-- Hinweis: App als Dev-Build mit Metro starten/verbinden. Fuer native Aenderungen sichtbar: App neu bauen mit `pnpm exec expo run:ios --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
-- Fuer normales Starten per App-Icon im Simulator: `pnpm exec expo run:ios --configuration Release --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`. Danach braucht die App kein Metro.
+- Fuer native Aenderungen neu bauen: `pnpm exec expo run:ios --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`
+- Fuer Release-Build (kein Metro noetig): `pnpm exec expo run:ios --configuration Release --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`
 
 ## Aktueller Fokus
 
-Aktueller unmittelbarer naechster Schritt: neue Chat-Migration ausfuehren und Messenger im Simulator testen.
+Karten-Popup-System ist vollständig gefixt und poliert. Nächste sinnvolle Schritte:
+- Chat-Migration in Supabase ausführen: `supabase/migrations/20260528090000_chat_reliability_security.sql`
+- Messenger im Simulator testen
+- Weitere Features nach Bedarf
 
-```bash
-cd /Users/razvan/Desktop/Local-Connect/artifacts/mobile
-pnpm exec expo run:ios --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF
-```
+## Zuletzt erledigt (2026-05-28) — Session 6
 
-Grund: Der User moechte, dass ab jetzt alles auf dem vorherigen iPhone 17 Simulator laeuft.
+### Karten-Popup-System komplett gefixt (map.tsx)
 
-Neue Chat-Migration:
+**Problem 1 – Freunde zeigten mein Popup:**
+- Ursache: Me-Marker hatte `z-index: 90` und `pointer-events` auf dem Wrap — fing Klicks der dahinterliegenden Freunde ab
+- Fix: `meFr.wrap.style.pointerEvents = 'none'` (Inline-Style, nicht CSS-Klasse!) + Click-Handler direkt auf `meFr.fig`
 
-```bash
-/Users/razvan/Desktop/Local-Connect/supabase/migrations/20260528090000_chat_reliability_security.sql
-```
+**Problem 2 – Blank Map nach Popup-Implementierung:**
+- Ursache: `\'` in TypeScript-Template-Literals wird zu `'` ausgewertet → bricht JS-String-Literale im WebView → kompletter Parse-Fehler
+- Fix: Alle `innerHTML`-Strings durch `createElement` + `textContent` + `addEventListener` ersetzt
 
-Sie ergaenzt `chat_messages` um Client-IDs, Status, Receipts, Attachments, Block/Report-Basics und den `chat-images` Storage Bucket.
+**Problem 3 – Klicks auf Marker tun nichts:**
+- Ursache: WKWebView-Bug: CSS-Klasse `pointer-events: none` auf Parent blockiert GESAMTEN Subtree inkl. Kinder mit `pointer-events: auto`
+- Fix: Globale CSS-Änderungen rückgängig gemacht; `pointer-events: none` nur Inline auf `meFr.wrap` (Me-Marker)
+
+**Problem 4 – Popup-Animation springt von rechts nach links:**
+- Ursache: Keyframe `transform` überschreibt das Basis-CSS `transform: translateX(-50%)` → Popup erscheint rechts, springt dann nach links
+- Fix: Eigene `fig-popup-appear`-Keyframes mit `translateX(-50%)` in `from` + `to`, nur auf `.fig-popup-inner.visible`
+
+**Problem 5 – Phantom-Popups ohne Klick auf Figur:**
+- Ursache: `fr.wrap` bounding-box umfasst ganzen Name-Tag-Bereich, Klick im transparenten Bereich löste Popup aus
+- Fix: `if (e.target === fr.wrap) return;` — nur Klicks auf sichtbare Kindelemente zählen
+
+**Weitere Verbesserungen:**
+- `map.on('click')`-Listener-Akkumulation beseitigt: ein einziger Handler schließt alle Popups
+- 44pt Mindest-Touch-Target für Me-Marker: `.fig.fig-me { min-width: 44px; min-height: 44px }`
+- iOS `touch-action: manipulation` + `-webkit-tap-highlight-color: transparent` auf `.fig` + `.fig-wrap`
+- `map.on('dragstart')` schließt nun ebenfalls Inline-Popups
+
+### /sync Skill neu angelegt
+- Neuer Pfad: `~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/.../skills/sync/SKILL.md`
+- Alter Pfad `~/.claude/skills/sync/` existiert nicht mehr
+
+Betroffene Dateien:
+- `artifacts/mobile/app/(tabs)/map.tsx`
 
 ## Zuletzt erledigt (2026-05-25) — aktuelle Session
 

@@ -789,6 +789,142 @@ function buildMapHtml(
 	      80%  { box-shadow: 0 0 0 24px rgba(239,255,58,0), 0 0 30px rgba(239,255,58,0.26); }
 	      100% { box-shadow: 0 0 0 0 rgba(239,255,58,0), 0 0 14px rgba(239,255,58,0.42); }
 	    }
+    /* ── Walking Figures (Phase 1) ──────────────────────────────── */
+    .fig-wrap {
+      display: flex; flex-direction: column; align-items: center;
+      transform-origin: 50% 50%; position: relative;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .fig {
+      position: relative; display: flex; flex-direction: column; align-items: center;
+      gap: 1px; cursor: pointer;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .fig.fig-me { min-width: 44px; min-height: 44px; justify-content: center; }
+    .fig-glow {
+      position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%);
+      width: 30px; height: 8px; border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(239,255,58,0.42) 0%, transparent 70%);
+      pointer-events: none; opacity: 0; transition: opacity 1.2s;
+    }
+    .fig-head {
+      width: 13px; height: 13px; border-radius: 50%;
+      background: #efff3a; border: 2px solid rgba(255,255,255,0.92); flex-shrink: 0; z-index: 2;
+      box-shadow: 0 0 8px rgba(239,255,58,0.95), 0 0 18px rgba(239,255,58,0.55);
+    }
+    .fig-body {
+      width: 5px; height: 8px; background: #efff3a; border-radius: 2px; flex-shrink: 0;
+      box-shadow: 0 0 6px rgba(239,255,58,0.7);
+    }
+    .fig-legs { display: flex; gap: 3px; }
+    .fig-leg {
+      width: 3px; height: 9px; background: #efff3a; border-radius: 2px;
+      transform-origin: 50% 0%; box-shadow: 0 0 4px rgba(239,255,58,0.6);
+    }
+    .fig.fig-me .fig-head { width: 16px; height: 16px; box-shadow: 0 0 12px rgba(239,255,58,1), 0 0 26px rgba(239,255,58,0.6); }
+    .fig.fig-me .fig-body { width: 6px; height: 10px; }
+    .fig.fig-me .fig-leg  { width: 4px; height: 11px; }
+    .fig.fig-me ~ .fig-glow, .fig-wrap > .fig.fig-me + .fig-glow { display: none; }
+    /* Idle */
+    @keyframes fig-bob       { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-1.5px)} }
+    @keyframes fig-sway-l    { 0%,100%{transform:rotate(-9deg)} 50%{transform:rotate(9deg)} }
+    @keyframes fig-sway-r    { 0%,100%{transform:rotate(9deg)} 50%{transform:rotate(-9deg)} }
+    .fig[data-state="idle"] .fig-head,
+    .fig[data-state="idle"] .fig-body { animation: fig-bob 2.2s ease-in-out infinite; }
+    .fig[data-state="idle"] .fig-leg:first-child { animation: fig-sway-l 2.2s ease-in-out infinite; }
+    .fig[data-state="idle"] .fig-leg:last-child  { animation: fig-sway-r 2.2s ease-in-out infinite; }
+    /* Walk */
+    @keyframes fig-walk-l    { 0%{transform:rotate(-33deg)} 50%{transform:rotate(33deg)} 100%{transform:rotate(-33deg)} }
+    @keyframes fig-walk-r    { 0%{transform:rotate(33deg)} 50%{transform:rotate(-33deg)} 100%{transform:rotate(33deg)} }
+    @keyframes fig-walk-body { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-1px)} }
+    .fig[data-state="walk"] .fig-leg:first-child { animation: fig-walk-l 0.54s ease-in-out infinite; }
+    .fig[data-state="walk"] .fig-leg:last-child  { animation: fig-walk-r 0.54s ease-in-out infinite; }
+    .fig[data-state="walk"] .fig-head,
+    .fig[data-state="walk"] .fig-body { animation: fig-walk-body 0.54s ease-in-out infinite; }
+    /* Run */
+    .fig[data-state="run"] .fig-leg:first-child { animation: fig-walk-l 0.27s ease-in-out infinite; }
+    .fig[data-state="run"] .fig-leg:last-child  { animation: fig-walk-r 0.27s ease-in-out infinite; }
+    .fig[data-state="run"] .fig-head,
+    .fig[data-state="run"] .fig-body { animation: fig-walk-body 0.27s ease-in-out infinite; }
+    /* Phase 2: smooth GPS-updates via JS interpolation (keine CSS transition – würde Panning verlangsamen) */
+    /* ── Inline-Popup (Teil der Figur, kein MapLibre Popup API) ── */
+    @keyframes fig-popup-appear {
+      from { transform: translateX(-50%) translateY(8px) scale(0.92); opacity: 0; }
+      to   { transform: translateX(-50%) translateY(0)   scale(1);    opacity: 1; }
+    }
+    .fig-popup-inner {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(7,19,31,0.97);
+      border: 1.5px solid rgba(0,240,255,0.55);
+      border-radius: 10px;
+      box-shadow: 0 0 18px rgba(0,240,255,0.28);
+      padding: 10px 14px;
+      min-width: 160px;
+      max-width: 210px;
+      z-index: 200;
+      display: none;
+      pointer-events: auto;
+    }
+    .fig-popup-inner.visible {
+      display: block;
+      animation: fig-popup-appear 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+    .fig-popup-inner::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: rgba(0,240,255,0.55);
+    }
+    .fig-popup-name { color: #efff3a; font-size: 14px; font-weight: 900; display: block; margin-bottom: 3px; }
+    .fig-popup-sub  { color: #00f0ff; font-size: 11px; font-weight: 700; display: block; }
+    .fig-popup-link { color: #ff2bd6; font-size: 12px; font-weight: 800; cursor: pointer; display: block; margin-top: 7px; text-decoration: none; }
+    /* ── Phase 3: Burst rings ───────────────────────────────────── */
+    @keyframes burst-ring {
+      0%   { transform: scale(1); opacity: 0.9; }
+      100% { transform: scale(4); opacity: 0; }
+    }
+    .burst-ring {
+      position: absolute; left: 50%; top: 50%;
+      width: 22px; height: 22px; margin: -11px 0 0 -11px;
+      border-radius: 50%; border: 2px solid #efff3a;
+      pointer-events: none;
+      animation: burst-ring 0.65s ease-out forwards;
+    }
+    /* ── Phase 3: Party confetti ────────────────────────────────── */
+    @keyframes confetti-fly {
+      0%   { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+      100% { transform: translate(var(--dx),var(--dy)) rotate(var(--rot)) scale(0.3); opacity: 0; }
+    }
+    .confetti-dot {
+      position: absolute; width: 5px; height: 5px; border-radius: 50%;
+      pointer-events: none; z-index: 600;
+      animation: confetti-fly 0.78s ease-out forwards;
+      transform: translate(-50%,-50%);
+    }
+    /* ── Phase 3: Figure pop-in stagger ────────────────────────── */
+    @keyframes fig-pop-in {
+      0%   { transform: scale(0) translateY(8px); opacity: 0; }
+      68%  { transform: scale(1.18) translateY(-2px); opacity: 1; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+    .fig-entering { animation: fig-pop-in 0.32s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+    /* ── Phase 4: Ambient particles ─────────────────────────────── */
+    @keyframes ambient-float {
+      0%   { transform: translate(0,0); opacity: var(--op); }
+      50%  { opacity: calc(var(--op) * 1.7); }
+      100% { transform: translate(var(--dx),var(--dy)); opacity: 0; }
+    }
+    .ambient-p {
+      position: fixed; width: 2px; height: 2px; border-radius: 50%;
+      pointer-events: none; z-index: 320;
+      animation: ambient-float var(--dur) ease-in-out infinite alternate;
+    }
     .popup { font-size: 13px; min-width: 130px; }
     .popup a  { display: block; color: var(--ink); font-weight: 800; cursor: pointer; text-decoration: none; }
 	    .popup a:active { color: var(--accent); }
@@ -1496,6 +1632,8 @@ function buildMapHtml(
     }
 
     map.on('click', function(event) {
+      document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p) { p.classList.remove('visible'); });
+
       if (event.originalEvent && isMarkerOrPopupTap(event.originalEvent.target)) {
         return;
       }
@@ -1519,6 +1657,7 @@ function buildMapHtml(
     });
 
     map.on('dragstart', function() {
+      document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p) { p.classList.remove('visible'); });
       markerRefs.forEach(function(marker) {
         try {
           var p = marker.getPopup && marker.getPopup();
@@ -1565,6 +1704,91 @@ function buildMapHtml(
         '</div>'
       ].join('');
     }
+
+    // ── Game-layer helpers ────────────────────────────────────────
+    function figureEl(isMe) {
+      var wrap = document.createElement('div');
+      wrap.className = 'fig-wrap';
+      var fig = document.createElement('div');
+      fig.className = isMe ? 'fig fig-me' : 'fig';
+      fig.dataset.state = 'idle';
+      var glow = document.createElement('div'); glow.className = 'fig-glow';
+      var head = document.createElement('div'); head.className = 'fig-head';
+      var body = document.createElement('div'); body.className = 'fig-body';
+      var legs = document.createElement('div'); legs.className = 'fig-legs';
+      var legL = document.createElement('div'); legL.className = 'fig-leg';
+      var legR = document.createElement('div'); legR.className = 'fig-leg';
+      legs.appendChild(legL); legs.appendChild(legR);
+      fig.appendChild(glow); fig.appendChild(head); fig.appendChild(body); fig.appendChild(legs);
+      wrap.appendChild(fig);
+      return { wrap: wrap, fig: fig };
+    }
+
+    function setFigureState(figEl, speed, heading) {
+      var state = (!speed || speed < 0.4) ? 'idle' : speed < 2.5 ? 'walk' : 'run';
+      if (figEl.dataset.state !== state) figEl.dataset.state = state;
+      if (heading != null && !isNaN(heading)) {
+        figEl.parentElement.style.transform = 'rotate(' + heading.toFixed(1) + 'deg)';
+      }
+      var glow = figEl.querySelector('.fig-glow');
+      if (glow) glow.style.opacity = (window._tod && window._tod.n > 0.3) ? String(Math.min(window._tod.n * 0.9, 1).toFixed(2)) : '0';
+    }
+
+    function triggerBurst(el) {
+      if (!el) return;
+      for (var bi = 0; bi < 4; bi++) {
+        (function(delay) {
+          var ring = document.createElement('div');
+          ring.className = 'burst-ring';
+          ring.style.animationDelay = delay + 's';
+          el.appendChild(ring);
+          setTimeout(function() { if (ring.parentNode) ring.parentNode.removeChild(ring); }, 900);
+        })(bi * 0.13);
+      }
+    }
+
+    function triggerPartyConfetti(lat, lng) {
+      if (!window.map) return;
+      var pt = window.map.project([lng, lat]);
+      var colors = ['#efff3a', '#00f0ff', '#ff2bd6', '#00ffb2', '#ff3864'];
+      for (var ci = 0; ci < 12; ci++) {
+        (function(idx) {
+          var dot = document.createElement('div');
+          dot.className = 'confetti-dot';
+          var angle = (idx / 12) * Math.PI * 2;
+          var dist = 28 + Math.random() * 36;
+          dot.style.setProperty('--dx', (Math.cos(angle) * dist).toFixed(1) + 'px');
+          dot.style.setProperty('--dy', (Math.sin(angle) * dist).toFixed(1) + 'px');
+          dot.style.setProperty('--rot', (Math.random() * 360).toFixed(0) + 'deg');
+          dot.style.background = colors[idx % colors.length];
+          dot.style.left = pt.x.toFixed(1) + 'px';
+          dot.style.top  = pt.y.toFixed(1) + 'px';
+          dot.style.animationDelay = (idx * 0.038).toFixed(3) + 's';
+          document.body.appendChild(dot);
+          setTimeout(function() { if (dot.parentNode) dot.parentNode.removeChild(dot); }, 1000);
+        })(ci);
+      }
+    }
+
+    function spawnAmbientParticles() {
+      var colors = ['#efff3a', '#00f0ff', '#ff2bd6', '#00ffb2'];
+      for (var ai = 0; ai < 22; ai++) {
+        (function(idx) {
+          var p = document.createElement('div');
+          p.className = 'ambient-p';
+          p.style.left = (Math.random() * 100).toFixed(1) + 'vw';
+          p.style.top  = (Math.random() * 100).toFixed(1) + 'vh';
+          p.style.background = colors[idx % colors.length];
+          p.style.setProperty('--dur', (9 + Math.random() * 13).toFixed(1) + 's');
+          p.style.setProperty('--dx', (Math.random() * 52 - 26).toFixed(1) + 'px');
+          p.style.setProperty('--dy', (Math.random() * 52 - 26).toFixed(1) + 'px');
+          p.style.setProperty('--op', (0.06 + Math.random() * 0.09).toFixed(2));
+          p.style.animationDelay = (Math.random() * -13).toFixed(1) + 's';
+          document.body.appendChild(p);
+        })(ai);
+      }
+    }
+    // ── End game-layer helpers ────────────────────────────────────
 
     function markerEl(size, background, border, shadow, innerHtml) {
       var el = document.createElement('div');
@@ -1915,12 +2139,82 @@ function buildMapHtml(
       var neonYellow = '#efff3a';
       var neonGreen = '#00ffb2';
       window._mapUsersById = {};
+      if (!window._figureMarkers) window._figureMarkers = {};
+      var seenFigureIds = {};
 
-      users.forEach(function(u) {
+      users.forEach(function(u, uIdx) {
         var showDatingMarker = currentFilter === 'dating' && u.intent !== 'active';
-        var showFriendMarker = currentFilter === 'friends';
-        var el = null;
+        var isFriend = !!u.isFriend;
+        var useFigure = isFriend && !showDatingMarker;
 
+        var avatarSrc = u.avatarUrl
+          ? u.avatarUrl
+          : 'https://api.dicebear.com/9.x/thumbs/png?seed=' + encodeURIComponent(u.id || u.name || 'local');
+        var activityText = u.intent === 'relationship'
+          ? 'Gerade auf Beziehungssuche'
+          : u.intent === 'friend'
+            ? 'Gerade auf Freundesuche'
+            : 'Gerade online unterwegs';
+        window._mapUsersById[u.id] = { name: u.name || '', avatarUrl: avatarSrc, isFriend: isFriend, activity: activityText };
+
+        if (useFigure) {
+          seenFigureIds[u.id] = true;
+          var motion = (window._mapMotion || {})[u.id] || {};
+          var existing = window._figureMarkers[u.id];
+          if (existing) {
+            existing.marker.setLngLat([u.lng, u.lat]);
+            setFigureState(existing.fig, motion.speed, motion.heading);
+            return;
+          }
+          var fr = figureEl(false);
+          var lbl = document.createElement('div');
+          lbl.className = 'friend-name-tag';
+          lbl.textContent = u.name || 'Freund';
+          fr.wrap.insertBefore(lbl, fr.wrap.firstChild);
+          setFigureState(fr.fig, motion.speed, motion.heading);
+          fr.wrap.style.zIndex = '2';
+          fr.wrap.style.animationDelay = (uIdx * 0.048) + 's';
+          fr.wrap.classList.add('fig-entering');
+          setTimeout(function(w){ w.classList.remove('fig-entering'); w.style.animationDelay = ''; }.bind(null, fr.wrap), 620);
+          var fMarker = new maplibregl.Marker({ element: fr.wrap, anchor: 'center' })
+            .setLngLat([u.lng, u.lat])
+            .addTo(map);
+          var inlinePopup = document.createElement('div');
+          inlinePopup.className = 'fig-popup-inner';
+          var pName = document.createElement('span');
+          pName.className = 'fig-popup-name';
+          pName.textContent = u.name || 'Freund';
+          var pSub = document.createElement('span');
+          pSub.className = 'fig-popup-sub';
+          pSub.textContent = activityText;
+          inlinePopup.appendChild(pName);
+          inlinePopup.appendChild(pSub);
+          if (u.id) {
+            var pLink = document.createElement('a');
+            pLink.className = 'fig-popup-link';
+            pLink.textContent = 'Profil öffnen →';
+            (function(uid) {
+              pLink.addEventListener('click', function(e) {
+                e.stopPropagation();
+                postNativeMessage({type: 'user_detail', id: uid});
+              });
+            })(u.id);
+            inlinePopup.appendChild(pLink);
+          }
+          fr.wrap.appendChild(inlinePopup);
+          inlinePopup.addEventListener('click', function(e) { e.stopPropagation(); });
+          fr.wrap.addEventListener('click', function(e) {
+            if (e.target === fr.wrap) return;
+            e.stopPropagation();
+            var isVisible = inlinePopup.classList.contains('visible');
+            document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p) { p.classList.remove('visible'); });
+            if (!isVisible) { inlinePopup.classList.add('visible'); }
+          });
+          window._figureMarkers[u.id] = { marker: fMarker, fig: fr.fig, wrap: fr.wrap };
+          return;
+        }
+
+        var el = null;
         if (showDatingMarker) {
           var heartColor = u.intent === 'relationship' ? '#ff3864' : '#00ffb2';
           var heartBackground = u.intent === 'relationship' ? 'rgba(255,56,100,0.22)' : 'rgba(0,255,178,0.18)';
@@ -1931,110 +2225,89 @@ function buildMapHtml(
             '0 0 14px ' + heartBackground,
             '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + heartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
           );
-        } else if (showFriendMarker) {
-	          var bubble = markerEl(
-            22,
-            neonYellow,
-            '2px solid rgba(234,251,255,0.92)',
-	            '0 0 10px rgba(239,255,58,0.44)'
-	          );
-	          bubble.className = 'friend-pulse';
-	          var wrap = document.createElement('div');
-          wrap.className = 'friend-marker-wrap';
-          var label = document.createElement('div');
-          label.className = 'friend-name-tag';
-          label.textContent = u.name || 'Freund';
-          wrap.appendChild(label);
-          wrap.appendChild(bubble);
-          el = wrap;
+          el.className = 'pulse';
         } else {
-          var isFriend = !!u.isFriend;
           var circleSize = isFriend ? 22 : 13;
           var circleColor = isFriend ? neonYellow : neonGreen;
           var circleGlow = isFriend ? 'rgba(239,255,58,0.44)' : 'rgba(0,255,178,0.38)';
-	          el = markerEl(
-            circleSize,
-            circleColor,
-            '1px solid rgba(234,251,255,0.9)',
-	            '0 0 10px ' + circleGlow
-	          );
-	          if (isFriend) {
-	            el.className = 'friend-pulse';
-	          }
-	        }
-        if (showDatingMarker) {
-          el.className = 'pulse';
+          el = markerEl(circleSize, circleColor, '1px solid rgba(234,251,255,0.9)', '0 0 10px ' + circleGlow);
+          if (isFriend) el.className = 'friend-pulse';
         }
 
         var subtitle = showDatingMarker
           ? (u.intent === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde')
-          : currentFilter === 'friends'
-            ? 'Freund'
-            : 'Gerade aktiv ↗';
-
-        var activityText = u.intent === 'relationship'
-          ? 'Gerade auf Beziehungssuche'
-          : u.intent === 'friend'
-            ? 'Gerade auf Freundesuche'
-            : 'Gerade online unterwegs';
-
-        var avatarSrc = u.avatarUrl
-          ? u.avatarUrl
-          : 'https://api.dicebear.com/9.x/thumbs/png?seed=' + encodeURIComponent(u.id || u.name || 'local');
-        window._mapUsersById[u.id] = { name: u.name || '', avatarUrl: avatarSrc, isFriend: !!u.isFriend, activity: activityText };
-        var friendPopupHtml = infoSheetHtml(
-          u.name || 'Freund',
-          activityText,
-          '🧑',
-          u.id,
-          avatarSrc
-        );
+          : currentFilter === 'friends' ? 'Freund' : 'Gerade aktiv ↗';
 
         pushMarker(new maplibregl.Marker({ element: el, anchor: 'center' })
           .setLngLat([u.lng, u.lat])
           .setPopup(new maplibregl.Popup({ closeButton: false, offset: 10 }).setHTML(
-            currentFilter === 'friends'
-              ? friendPopupHtml
-              : infoSheetHtml(u.name || 'Local', subtitle, '🧑', u.id, avatarSrc)
+            infoSheetHtml(u.name || 'Local', subtitle, '🧑', u.id, avatarSrc)
           ))
           .addTo(map));
+      });
+
+      // Stale Figuren-Marker entfernen
+      Object.keys(window._figureMarkers).forEach(function(id) {
+        if (!seenFigureIds[id]) {
+          window._figureMarkers[id].marker.remove();
+          delete window._figureMarkers[id];
+        }
       });
     }
 
     function addMyMarker() {
       var myPresence = window._mapPresence || 'online';
-      var mePopupText = 'Gerade online';
-      var meEl = null;
+      var myLat = (window._myCurrentPos && window._myCurrentPos.lat) || ${lat};
+      var myLng = (window._myCurrentPos && window._myCurrentPos.lng) || ${lng};
 
       if (myPresence === 'friend' || myPresence === 'relationship') {
+        if (window._myFigureMarker) {
+          window._myFigureMarker.marker.remove();
+          window._myFigureMarker = null;
+        }
         var meHeartColor = myPresence === 'relationship' ? '#ff3864' : '#00ffb2';
         var meHeartBackground = myPresence === 'relationship' ? 'rgba(255,56,100,0.22)' : 'rgba(0,255,178,0.18)';
-        mePopupText = myPresence === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde';
-	        meEl = markerEl(
-	          42,
-	          'linear-gradient(135deg,rgba(7,19,31,0.96) 0%,' + meHeartBackground + ' 100%)',
-	          '2px solid ' + meHeartColor,
-	          '0 0 18px ' + meHeartBackground,
-	          '<svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + meHeartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
-	        );
-	      } else {
-	        meEl = markerEl(
-	          42,
-	          '#efff3a',
-	          '2px solid rgba(234,251,255,0.96)',
-	          '0 0 18px rgba(239,255,58,0.54)'
-	        );
+        var mePopupText = myPresence === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde';
+        var meEl = markerEl(
+          42,
+          'linear-gradient(135deg,rgba(7,19,31,0.96) 0%,' + meHeartBackground + ' 100%)',
+          '2px solid ' + meHeartColor,
+          '0 0 18px ' + meHeartBackground,
+          '<svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + meHeartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
+        );
+        meEl.style.zIndex = '90';
+        pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
+          .setLngLat([myLng, myLat])
+          .setPopup(new maplibregl.Popup({ closeButton: false, offset: 11 }).setHTML(infoSheetHtml('Du', mePopupText, '📍')))
+          .addTo(map));
+      } else {
+        if (!window._myFigureMarker) {
+          var meFr = figureEl(true);
+          meFr.wrap.style.zIndex = '90';
+          meFr.wrap.style.pointerEvents = 'none';
+          meFr.fig.style.pointerEvents = 'auto';
+          meFr.wrap.classList.add('fig-entering');
+          setTimeout(function() { meFr.wrap.classList.remove('fig-entering'); }, 420);
+          var mePopup = document.createElement('div');
+          mePopup.className = 'fig-popup-inner';
+          mePopup.innerHTML = '<span class="fig-popup-name">Du</span><span class="fig-popup-sub">Gerade online</span>';
+          meFr.wrap.appendChild(mePopup);
+          mePopup.addEventListener('click', function(e) { e.stopPropagation(); });
+          meFr.fig.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var isVisible = mePopup.classList.contains('visible');
+            document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p) { p.classList.remove('visible'); });
+            if (!isVisible) { mePopup.classList.add('visible'); }
+          });
+          var meMarker = new maplibregl.Marker({ element: meFr.wrap, anchor: 'center' })
+            .setLngLat([myLng, myLat])
+            .addTo(map);
+          window._myFigureMarker = { marker: meMarker, fig: meFr.fig, wrap: meFr.wrap };
+        } else {
+          window._myFigureMarker.marker.setLngLat([myLng, myLat]);
+        }
       }
-
-	      meEl.style.zIndex = '90';
-
-	      var meMarker = pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
-        .setLngLat([${lng}, ${lat}])
-        .setPopup(new maplibregl.Popup({ closeButton: false, offset: 11 }).setHTML(
-          infoSheetHtml('Du', mePopupText, '📍')
-        ))
-        .addTo(map));
-	    }
+    }
 
     function renderMapLayersAndMarkers() {
 	      clearMarkers();
@@ -2070,17 +2343,39 @@ function buildMapHtml(
     window._mapParties = [];
     window._mapFilter = 'all';
     window._mapPresence = 'online';
+    window._mapMotion = {};
+    window._figureMarkers = {};
+    window._myFigureMarker = null;
+    window._myCurrentPos = null;
 
-    window.updateMapData = function(users, pois, parties, filter, presence) {
+    window.updateMapData = function(users, pois, parties, filter, presence, motionData) {
       window._mapUsers = users || [];
       window._mapPois = pois || [];
       window._mapParties = parties || [];
       window._mapFilter = filter || 'all';
       window._mapPresence = presence || 'online';
+      window._mapMotion = motionData || {};
       if (window.map && window.map.isStyleLoaded()) {
         renderMapLayersAndMarkers();
         schedulePoiMarkerVisibilityUpdate();
       }
+    };
+
+    window.updateMyFigure = function(speed, heading, lat, lng) {
+      window._myCurrentPos = { lat: lat, lng: lng };
+      if (window._myFigureMarker) {
+        window._myFigureMarker.marker.setLngLat([lng, lat]);
+        setFigureState(window._myFigureMarker.fig, speed, heading);
+      }
+    };
+
+    window.triggerProximityBurst = function(userId) {
+      var entry = window._figureMarkers && window._figureMarkers[userId];
+      if (entry) triggerBurst(entry.wrap);
+    };
+
+    window.triggerPartySpawn = function(lat, lng) {
+      triggerPartyConfetti(lat, lng);
     };
 
     window.applyTimeOfDay = function(nightFactor, dawnDuskFactor) {
@@ -2106,6 +2401,8 @@ function buildMapHtml(
     map.on('style.load', function() {
       if (window._tod) window.applyTimeOfDay(window._tod.n, window._tod.d);
     });
+
+    spawnAmbientParticles();
 
   </script>
 </body>
@@ -2134,6 +2431,10 @@ export default function MapScreen() {
 
   const webViewRef = useRef<WebViewType>(null);
   const injectMapDataRef = useRef<(() => void) | null>(null);
+  const prevGpsRef = useRef<{ lat: number; lon: number; time: number } | null>(null);
+  const mySpeedRef = useRef<number>(0);
+  const myHeadingRef = useRef<number | null>(null);
+  const prevRadarIdsRef = useRef<Set<string>>(new Set());
 
   const injectRadar = useCallback(() => {
     if (!webViewRef.current) return;
@@ -2245,6 +2546,47 @@ export default function MapScreen() {
       return () => setIsMapActive(false);
     }, []),
   );
+
+  // Phase 1+2: GPS → speed/heading → Figur-Update (smooth movement)
+  useEffect(() => {
+    if (!myLiveLocation || !webViewRef.current || !isMapActive) return;
+    const { lat, lon } = myLiveLocation;
+    const now = Date.now();
+    const prev = prevGpsRef.current;
+    if (prev) {
+      const dt = (now - prev.time) / 1000;
+      if (dt > 0.3) {
+        const dLat = lat - prev.lat;
+        const dLon = lon - prev.lon;
+        const distM = Math.sqrt(dLat * dLat + dLon * dLon) * 111320;
+        mySpeedRef.current = distM / dt;
+        if (distM > 0.8) {
+          myHeadingRef.current = Math.atan2(dLon, dLat) * 180 / Math.PI;
+        }
+      }
+    }
+    prevGpsRef.current = { lat, lon, time: now };
+    const speed = mySpeedRef.current;
+    const heading = myHeadingRef.current;
+    const headingStr = heading != null ? heading.toFixed(1) : 'null';
+    webViewRef.current.injectJavaScript(
+      `(function(){if(window.updateMyFigure)window.updateMyFigure(${speed.toFixed(3)},${headingStr},${lat},${lon});})();true;`
+    );
+  }, [myLiveLocation, isMapActive]);
+
+  // Phase 3: Proximity-Burst wenn ein neuer Nutzer in Reichweite erscheint
+  useEffect(() => {
+    if (!radarUsers || !webViewRef.current || !isMapActive) return;
+    const currentIds = new Set(radarUsers.map((u) => u.entity_id));
+    radarUsers.forEach((u) => {
+      if (!prevRadarIdsRef.current.has(u.entity_id)) {
+        webViewRef.current!.injectJavaScript(
+          `(function(){if(window.triggerProximityBurst)window.triggerProximityBurst(${JSON.stringify(u.entity_id)});})();true;`
+        );
+      }
+    });
+    prevRadarIdsRef.current = currentIds;
+  }, [radarUsers, isMapActive]);
 
   useEffect(() => {
     Animated.spring(partyPanelAnim, {
@@ -2765,6 +3107,7 @@ out center tags ${LIVE_POI_LIMIT};`;
             ${JSON.stringify(presenceMode)}
           );
           if(window.map) window.map.easeTo({ center: [${partyLng}, ${partyLat}], zoom: 15, duration: 700 });
+          if(window.triggerPartySpawn) window.triggerPartySpawn(${partyLat}, ${partyLng});
         })();true;`
       );
     }

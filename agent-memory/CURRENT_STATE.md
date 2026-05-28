@@ -1,12 +1,12 @@
 # Current State
 
-Stand: 2026-05-25
+Stand: 2026-05-28
 
 ## Kurzfassung
 
 Locals ist eine Expo React Native iOS-App mit Supabase Auth/Backend, Kartenmodus, Messenger-Tab, Party-Funktionen, Startmodus `Online`/`Daheim`, Geofencing-Idee und austauschbarem Grafikstil-System.
 
-Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator. Ab jetzt soll die Locals-App standardmaessig auf dem vorherigen iPhone 17 Simulator laufen: UDID `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
+Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator. **DER einzige Simulator fuer Locals: iPhone 17 (iOS 26.5), UDID `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.** Es gibt mehrere iPhone-17-Simulatoren — nur dieser hat die App installiert. Immer diesen booten, nie einen anderen.
 - App-Name fuer Nutzer: `Locals`.
 - Messenger-Fundament gestartet: Optimistic Sending, Sendestatus, Realtime-Dedupe, App-Fokus-Resync und Chat-Bilder via `chat-images`.
 - Neue Supabase-Migration ausfuehren: `supabase/migrations/20260528090000_chat_reliability_security.sql`.
@@ -33,6 +33,7 @@ Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator. Ab jetzt 
 - Party-Button/Panel und Party-Erstellung existieren.
 - Party folgt dem Host-Standort.
 - Party-Marker zoomt beim Klick rein; erneuter Klick soll zur vorherigen Zoomstufe zurück.
+- Karten-Popup-System vollständig gefixt: Inline-Popups über Figurenköpfen, korrekte Animation, Phantom-Popup-Fix, WKWebView pointer-events-Fix.
 - Karte nutzt Comic/Neon-inspirierte POIs, 3D-Buildings und Dev-3D-Button.
 - Aktueller Grafikstil ist `neon`.
 - Gruppen- und Partymechanik ist app-weit im `AppContext` verdrahtet.
@@ -45,7 +46,8 @@ Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator. Ab jetzt 
 
 ## Naechster wichtiger Schritt
 
-Neue Chat-Migration in Supabase ausfuehren: `supabase/migrations/20260528090000_chat_reliability_security.sql`.
+Neue Chat-Migration in Supabase ausfuehren: `supabase/migrations/20260528090000_chat_reliability_security.sql`
+(noch nicht ausgefuehrt — Messenger-Fundament wartet darauf).
 
 Empfohlener Befehl:
 
@@ -111,7 +113,7 @@ pnpm exec expo start --dev-client --host localhost
 <!-- APP_SYNC_STATUS_START -->
 ## Letzter Sync
 
-- Timestamp UTC: 20260527T234732Z
+- Timestamp UTC: 20260528T120000Z
 - Projekt: Local-Connect
 - Branch: master
 - Commit vor Sync: e83fe2d
@@ -121,15 +123,7 @@ pnpm exec expo start --dev-client --host localhost
 
 ### Geänderte Dateien vor Sync
 
-- ` M agent-memory/CLAUDE_MEMORY.md`
 - ` M agent-memory/CODEX_HANDOFF.md`
 - ` M agent-memory/CURRENT_STATE.md`
-- ` M artifacts/mobile/app.json`
-- ` M artifacts/mobile/app/(auth)/login.tsx`
-- ` M artifacts/mobile/app/(auth)/register.tsx`
-- ` M artifacts/mobile/app/(tabs)/index.tsx`
-- ` M artifacts/mobile/app/location-setup.tsx`
-- ` M artifacts/mobile/app/onboarding.tsx`
-- ` M artifacts/mobile/context/AppContext.tsx`
-- `?? supabase/migrations/20260528090000_chat_reliability_security.sql`
+- ` M artifacts/mobile/app/(tabs)/map.tsx`
 <!-- APP_SYNC_STATUS_END -->
