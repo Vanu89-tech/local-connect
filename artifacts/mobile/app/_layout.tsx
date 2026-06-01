@@ -75,14 +75,17 @@ function RootLayoutNav() {
 
         if (locData) {
           const parsedLoc = JSON.parse(locData);
-          const hasAddress =
-            typeof parsedLoc?.homeLocation?.address === "string" &&
-            parsedLoc.homeLocation.address.trim().length > 0;
-          if (!hasAddress && !onLocationSetup) {
+          // Accept lat+lng OR address string as proof of completed setup
+          const hasLocation =
+            (typeof parsedLoc?.homeLocation?.lat === "number" &&
+              typeof parsedLoc?.homeLocation?.lng === "number") ||
+            (typeof parsedLoc?.homeLocation?.address === "string" &&
+              parsedLoc.homeLocation.address.trim().length > 0);
+          if (!hasLocation && !onLocationSetup) {
             replaceIfCurrent("/location-setup");
             return;
           }
-          if (!hasAddress) return;
+          if (!hasLocation) return;
         }
 
         if (locData && !hasSelectedStartMode && !onPresenceChoice) {

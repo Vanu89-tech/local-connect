@@ -351,6 +351,9 @@ type ProfileRow = {
   avatar_url: string | null;
   bio: string | null;
   home_location_name: string | null;
+  home_address: string | null;
+  home_lat: number | null;
+  home_lng: number | null;
 };
 
 type PostRow = {

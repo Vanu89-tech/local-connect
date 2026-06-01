@@ -21,10 +21,24 @@ Der User möchte iterativ im Simulator testen und Features direkt weiterentwicke
 
 ## Aktueller Fokus
 
-Karten-Popup-System ist vollständig gefixt und poliert. Nächste sinnvolle Schritte:
+Swipe-to-Reply im Messenger ist überarbeitet und gebaut. Nächste sinnvolle Schritte:
 - Chat-Migration in Supabase ausführen: `supabase/migrations/20260528090000_chat_reliability_security.sql`
-- Messenger im Simulator testen
-- Weitere Features nach Bedarf
+- Weitere Messenger-Features nach Bedarf
+
+## Zuletzt erledigt (2026-06-01) — Session 7
+
+### Swipe-to-Reply Mechanik überarbeitet (index.tsx)
+
+- Pfeil-Indikator (corner-up-left Icon + swipeArrow Styles) komplett entfernt — keine visuelle Ablenkung mehr beim Swipen
+- Gestenerkennung verbessert: Threshold 10px → 6px, Winkel 1.8x → 1.3x (Geste wird früher + bei diagonaler Bewegung erkannt)
+- Widerstandskurve eingebaut: 1:1 bis 36px, danach nur 40% → natürlicher Gummiband-Effekt
+- Haptic-Vorab-Feedback: Light-Impact genau bei 44px-Schwellwert während der Bewegung, Medium beim Loslassen
+- Echter Bounceback via `Animated.spring` mit `bounciness: 10` nach erfolgreichem Swipe
+- `onPanResponderTerminate` hinzugefügt für sauberes Abbrechen
+- Release-Build neu gebaut und auf Simulator installiert (BUILD SUCCEEDED)
+
+### Betroffene Dateien
+- `artifacts/mobile/app/(tabs)/index.tsx`
 
 ## Zuletzt erledigt (2026-05-28) — Session 6
 

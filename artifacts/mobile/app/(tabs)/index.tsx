@@ -5,8 +5,10 @@ import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -20,392 +22,513 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { ChatMessage, Group, Party, User, useApp } from "@/context/AppContext";
 
-const TAB_BAR_OVERLAY_HEIGHT = 84;
-const EMOJI_PANEL_HEIGHT = 280;
+const TAB_BAR_H = 84;
+const EMOJI_PANEL_H = 280;
+const QUICK_REACT = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+const isNeon = Colors.activeStyle.id === "neon";
+const partySurf = isNeon ? "rgba(255,43,214,0.18)" : Colors.light.backgroundTertiary;
+const utilSurf  = isNeon ? "rgba(0,240,255,0.12)"  : Colors.light.backgroundTertiary;
 
-const isNeonMessagesStyle = Colors.activeStyle.id === "neon";
-const partyThreadSurface = isNeonMessagesStyle
-  ? "rgba(255,43,214,0.18)"
-  : Colors.light.backgroundTertiary;
-const utilityButtonSurface = isNeonMessagesStyle
-  ? "rgba(0,240,255,0.12)"
-  : Colors.light.backgroundTertiary;
-
-// ── Emoji data ──────────────────────────────────────────────────────────────
+// ── Emoji categories ──────────────────────────────────────────────────────────
 const EMOJI_CATEGORIES = [
-  {
-    id: "smileys", icon: "😊", label: "Smileys",
-    emojis: ["😊","😂","🥰","😎","🤔","😅","🙏","😢","😠","🤣","😍","🥺","😮","😴","🤩","😤","🫶","🤗","😬","😇","😭","🤯","😱","🫠","😏","🤫","🫡","🥳","😜","🤪"],
-  },
-  {
-    id: "gestures", icon: "👍", label: "Gesten",
-    emojis: ["👍","👎","❤️","🔥","💯","✨","🎉","🙌","👏","🤝","💪","👀","💀","💫","⚡","🫂","🤌","✌️","👋","🤙","☝️","👆","🤞","🙊","🙈","💋","💔","❣️","💕","🫀"],
-  },
-  {
-    id: "fun", icon: "🎮", label: "Spaß",
-    emojis: ["🎮","🎵","🎸","🎨","🎭","🏆","🎯","🚀","🌈","🎪","🎤","🎬","🎲","🎳","🎱","🎰","🎠","🎡","🎢","🎻","🥁","🎷","🎺","🎹","🎧","📸","💻","📱","🖥️","🎃"],
-  },
-  {
-    id: "food", icon: "🍕", label: "Essen",
-    emojis: ["🍕","🍜","🍺","☕","🍔","🌮","🍣","🍦","🎂","🍰","🥐","🥗","🍱","🍛","🥩","🍗","🌯","🥙","🫔","🧆","🧇","🥞","🍩","🍪","🍫","🍭","🧃","🥤","🍹","🥂"],
-  },
-  {
-    id: "nature", icon: "🌸", label: "Natur",
-    emojis: ["🌸","🌻","🍀","🌿","🌳","🦋","🐱","🐶","🦊","🌞","🌧️","❄️","🌺","🍂","🦁","🐼","🦄","🌴","🍄","🐸","🌊","🏔️","🌙","⭐","🌟","🌈","🍁","🌾","🎄","🌵"],
-  },
+  { id:"smileys",  icon:"😊", label:"Smileys",  emojis:["😊","😂","🥰","😎","🤔","😅","🙏","😢","😠","🤣","😍","🥺","😮","😴","🤩","😤","🫶","🤗","😬","😇","😭","🤯","😱","🫠","😏","🤫","🫡","🥳","😜","🤪"] },
+  { id:"gestures", icon:"👍", label:"Gesten",   emojis:["👍","👎","❤️","🔥","💯","✨","🎉","🙌","👏","🤝","💪","👀","💀","💫","⚡","🫂","🤌","✌️","👋","🤙","☝️","👆","🤞","🙊","🙈","💋","💔","❣️","💕","🫀"] },
+  { id:"fun",      icon:"🎮", label:"Spaß",     emojis:["🎮","🎵","🎸","🎨","🎭","🏆","🎯","🚀","🌈","🎪","🎤","🎬","🎲","🎳","🎱","🎰","🎠","🎡","🎢","🎻","🥁","🎷","🎺","🎹","🎧","📸","💻","📱","🖥️","🎃"] },
+  { id:"food",     icon:"🍕", label:"Essen",    emojis:["🍕","🍜","🍺","☕","🍔","🌮","🍣","🍦","🎂","🍰","🥐","🥗","🍱","🍛","🥩","🍗","🌯","🥙","🫔","🧆","🧇","🥞","🍩","🍪","🍫","🍭","🧃","🥤","🍹","🥂"] },
+  { id:"nature",   icon:"🌸", label:"Natur",    emojis:["🌸","🌻","🍀","🌿","🌳","🦋","🐱","🐶","🦊","🌞","🌧️","❄️","🌺","🍂","🦁","🐼","🦄","🌴","🍄","🐸","🌊","🏔️","🌙","⭐","🌟","🌈","🍁","🌾","🎄","🌵"] },
 ];
 
-// ── Types ───────────────────────────────────────────────────────────────────
-
-type ChatContact = User & {
-  status: string;
-  messages: ChatMessage[];
-};
+// ── Types ─────────────────────────────────────────────────────────────────────
+type ChatContact = User & { status: string; messages: ChatMessage[] };
 
 type ChatThread =
-  | {
-      type: "profile";
-      id: string;
-      name: string;
-      subtitle: string;
-      avatar: string;
-      messages: ChatMessage[];
-      username: string;
-      status: string;
-    }
-  | {
-      type: "party";
-      id: string;
-      name: string;
-      subtitle: string;
-      icon: string;
-      messages: ChatMessage[];
-      party: Party;
-    }
-  | {
-      type: "group";
-      id: string;
-      name: string;
-      subtitle: string;
-      icon: string;
-      messages: ChatMessage[];
-      group: Group;
-    };
+  | { type: "profile"; id: string; name: string; subtitle: string; avatar: string; messages: ChatMessage[]; username: string; status: string }
+  | { type: "party";   id: string; name: string; subtitle: string; icon: string;   messages: ChatMessage[]; party: Party }
+  | { type: "group";   id: string; name: string; subtitle: string; icon: string;   messages: ChatMessage[]; group: Group };
 
-// ── Demo data ────────────────────────────────────────────────────────────────
+type MsgReaction = { emoji: string; count: number; mine: boolean };
+type ReplyTarget = { id: string; text: string; senderName: string };
+type ExtMsg = ChatMessage & { replyTo?: ReplyTarget };
+
+// ── Demo data ─────────────────────────────────────────────────────────────────
 const DEMO_PARTY: Party = {
-  id: "demo-party-griesle",
-  name: "Party im Griesle",
-  lat: 37.787,
-  lng: -122.407,
-  hostId: "maya",
-  hostName: "Maya",
+  id: "demo-party-griesle", name: "Party im Griesle",
+  lat: 37.787, lng: -122.407, hostId: "maya", hostName: "Maya",
   members: [
-    { id: "luca", name: "Luca", lat: 37.7871, lng: -122.4071 },
+    { id: "luca",  name: "Luca",  lat: 37.7871, lng: -122.4071 },
     { id: "priya", name: "Priya", lat: 37.7869, lng: -122.4072 },
-    { id: "sam", name: "Sam", lat: 37.7872, lng: -122.4069 },
+    { id: "sam",   name: "Sam",   lat: 37.7872, lng: -122.4069 },
   ],
   createdAt: new Date().toISOString(),
 };
 
 const FALLBACK_CONTACTS: ChatContact[] = [
-  {
-    id: "maya", name: "Maya", username: "maya",
-    avatar: "https://i.pravatar.cc/150?img=47", bio: "Coffee lover",
-    location: "Nearby", followersCount: 0, followingCount: 0, postsCount: 0,
-    status: "Sucht Kaffee in der Nähe",
-    messages: [
-      { id: "maya-1", senderId: "maya", text: "Hey, bist du später noch in der Gegend?", time: "12:34" },
-      { id: "maya-2", senderId: "me", text: "Ja, wahrscheinlich beim Park. Was geht?", time: "12:36" },
-      { id: "maya-3", senderId: "maya", text: "Ich wollte gleich einen kleinen Spaziergang machen.", time: "12:39" },
-    ],
-  },
-  {
-    id: "luca", name: "Luca", username: "luca",
-    avatar: "https://i.pravatar.cc/150?img=12", bio: "Street photos",
-    location: "Nearby", followersCount: 0, followingCount: 0, postsCount: 0,
-    status: "Fotografiert gerade draußen",
-    messages: [
-      { id: "luca-1", senderId: "luca", text: "Der Sonnenuntergang sieht heute wild aus.", time: "18:08" },
-      { id: "luca-2", senderId: "me", text: "Schick mal den Spot.", time: "18:10" },
-      { id: "luca-3", senderId: "luca", text: "Bin beim kleinen Platz neben der Haltestelle.", time: "18:11" },
-    ],
-  },
-  {
-    id: "priya", name: "Priya", username: "priya",
-    avatar: "https://i.pravatar.cc/150?img=25", bio: "Food finds",
-    location: "Nearby", followersCount: 0, followingCount: 0, postsCount: 0,
-    status: "Hat einen neuen Food-Spot",
-    messages: [
-      { id: "priya-1", senderId: "priya", text: "Ich glaube, ich habe das beste Sandwich hier gefunden.", time: "14:02" },
-      { id: "priya-2", senderId: "me", text: "Das ist eine große Behauptung.", time: "14:03" },
-      { id: "priya-3", senderId: "priya", text: "Dann musst du testen kommen.", time: "14:04" },
-    ],
-  },
-  {
-    id: "sam", name: "Sam", username: "sam",
-    avatar: "https://i.pravatar.cc/150?img=33", bio: "Dog walks",
-    location: "Nearby", followersCount: 0, followingCount: 0, postsCount: 0,
-    status: "Mit Biscuit unterwegs",
-    messages: [
-      { id: "sam-1", senderId: "sam", text: "Biscuit will neue Menschen kennenlernen.", time: "09:18" },
-      { id: "sam-2", senderId: "me", text: "Das klingt nach einem guten Plan.", time: "09:20" },
-      { id: "sam-3", senderId: "sam", text: "Wir laufen gleich Richtung Park.", time: "09:21" },
-    ],
-  },
+  { id:"maya",  name:"Maya",  username:"maya",  avatar:"https://i.pravatar.cc/150?img=47", bio:"Coffee lover",  location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Sucht Kaffee in der Nähe",   messages:[{ id:"maya-1",  senderId:"maya",  text:"Hey, bist du später noch in der Gegend?", time:"12:34" },{ id:"maya-2",  senderId:"me", text:"Ja, wahrscheinlich beim Park. Was geht?", time:"12:36" },{ id:"maya-3",  senderId:"maya",  text:"Ich wollte gleich einen kleinen Spaziergang machen.", time:"12:39" }] },
+  { id:"luca",  name:"Luca",  username:"luca",  avatar:"https://i.pravatar.cc/150?img=12", bio:"Street photos", location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Fotografiert gerade draußen", messages:[{ id:"luca-1",  senderId:"luca",  text:"Der Sonnenuntergang sieht heute wild aus.", time:"18:08" },{ id:"luca-2",  senderId:"me", text:"Schick mal den Spot.", time:"18:10" },{ id:"luca-3",  senderId:"luca",  text:"Bin beim kleinen Platz neben der Haltestelle.", time:"18:11" }] },
+  { id:"priya", name:"Priya", username:"priya", avatar:"https://i.pravatar.cc/150?img=25", bio:"Food finds",    location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Hat einen neuen Food-Spot",    messages:[{ id:"priya-1", senderId:"priya", text:"Ich glaube, ich habe das beste Sandwich hier gefunden.", time:"14:02" },{ id:"priya-2", senderId:"me", text:"Das ist eine große Behauptung.", time:"14:03" },{ id:"priya-3", senderId:"priya", text:"Dann musst du testen kommen.", time:"14:04" }] },
+  { id:"sam",   name:"Sam",   username:"sam",   avatar:"https://i.pravatar.cc/150?img=33", bio:"Dog walks",     location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Mit Biscuit unterwegs",       messages:[{ id:"sam-1",   senderId:"sam",   text:"Biscuit will neue Menschen kennenlernen.", time:"09:18" },{ id:"sam-2",   senderId:"me", text:"Das klingt nach einem guten Plan.", time:"09:20" },{ id:"sam-3",   senderId:"sam",   text:"Wir laufen gleich Richtung Park.", time:"09:21" }] },
 ];
 
-function toChatContacts(postsUsers: User[], currentUserId: string): ChatContact[] {
+function toChatContacts(users: User[], meId: string): ChatContact[] {
   const seen = new Set<string>();
-  const contacts = postsUsers
-    .filter((user) => user.id !== currentUserId)
-    .filter((user) => { if (seen.has(user.id)) return false; seen.add(user.id); return true; })
+  const cs = users
+    .filter((u) => u.id !== meId)
+    .filter((u) => { if (seen.has(u.id)) return false; seen.add(u.id); return true; })
     .slice(0, 8)
-    .map((user, index) => ({
-      ...user,
-      status: ["Online in deiner Nähe", "Gerade aktiv", "Offen für Pläne", "In der Umgebung"][index % 4],
+    .map((u, i) => ({
+      ...u,
+      status: ["Online in deiner Nähe","Gerade aktiv","Offen für Pläne","In der Umgebung"][i % 4],
       messages: [
-        { id: `${user.id}-1`, senderId: user.id, text: `Hey, ich bin gerade bei ${user.location || "dir in der Nähe"}.`, time: "Jetzt" },
-        { id: `${user.id}-2`, senderId: currentUserId, text: "Cool, was machst du gerade?", time: "Jetzt" },
-        { id: `${user.id}-3`, senderId: user.id, text: "Noch nichts Festes. Vielleicht ergibt sich etwas.", time: "Jetzt" },
+        { id:`${u.id}-1`, senderId:u.id,  text:`Hey, ich bin gerade bei ${u.location || "dir in der Nähe"}.`, time:"Jetzt" },
+        { id:`${u.id}-2`, senderId:meId,  text:"Cool, was machst du gerade?", time:"Jetzt" },
+        { id:`${u.id}-3`, senderId:u.id,  text:"Noch nichts Festes. Vielleicht ergibt sich etwas.", time:"Jetzt" },
       ],
     }));
-  return contacts.length ? contacts : FALLBACK_CONTACTS;
+  return cs.length ? cs : FALLBACK_CONTACTS;
 }
 
-function toPartyThreads(parties: Party[], currentUserId: string): ChatThread[] {
-  const visibleParties = parties.length ? parties : [DEMO_PARTY];
-  return visibleParties.map((party) => {
-    const firstMember = party.members[0];
-    const secondMember = party.members[1];
-    return {
-      type: "party",
-      id: `party:${party.id}`,
-      name: party.name,
-      subtitle: `${party.members.length} Mitglieder · ${party.hostName}`,
-      icon: "🎉",
-      party,
-      messages: [
-        { id: `${party.id}-party-1`, senderId: party.hostId, text: `${party.hostName} hat die Party gestartet.`, time: "Jetzt" },
-        { id: `${party.id}-party-2`, senderId: firstMember?.id ?? party.hostId, text: firstMember ? `${firstMember.name} ist dabei.` : "Wer ist dabei?", time: "Jetzt" },
-        { id: `${party.id}-party-3`, senderId: currentUserId, text: secondMember ? `Ich sehe ${secondMember.name} auch auf der Karte.` : "Ich komme gleich dazu.", time: "Jetzt" },
-      ],
-    };
-  });
+function toPartyThreads(parties: Party[], meId: string): ChatThread[] {
+  const list = parties.length ? parties : [DEMO_PARTY];
+  return list.map((p) => ({
+    type: "party" as const, id: `party:${p.id}`, name: p.name,
+    subtitle: `${p.members.length} Mitglieder · ${p.hostName}`, icon: "🎉", party: p,
+    messages: [
+      { id:`${p.id}-p1`, senderId:p.hostId,              text:`${p.hostName} hat die Party gestartet.`, time:"Jetzt" },
+      { id:`${p.id}-p2`, senderId:p.members[0]?.id??p.hostId, text:p.members[0]?`${p.members[0].name} ist dabei.`:"Wer ist dabei?", time:"Jetzt" },
+      { id:`${p.id}-p3`, senderId:meId,                  text:p.members[1]?`Ich sehe ${p.members[1].name} auch auf der Karte.`:"Ich komme gleich.", time:"Jetzt" },
+    ],
+  }));
 }
 
-function toGroupThreads(groups: Group[], currentUserId: string): ChatThread[] {
-  return groups.map((group) => {
-    const firstMember = group.members[0];
-    const secondMember = group.members[1];
-    return {
-      type: "group",
-      id: `group:${group.id}`,
-      name: group.name,
-      subtitle: `${group.members.length} Mitglieder · ${group.ownerName}`,
-      icon: "👥",
-      group,
-      messages: [
-        { id: `${group.id}-group-1`, senderId: group.ownerId, text: `${group.ownerName} hat die Gruppe erstellt.`, time: "Jetzt" },
-        { id: `${group.id}-group-2`, senderId: firstMember?.id ?? group.ownerId, text: firstMember ? `${firstMember.name} ist dabei.` : "Wer ist dabei?", time: "Jetzt" },
-        { id: `${group.id}-group-3`, senderId: currentUserId, text: secondMember ? `${secondMember.name} ist auch eingeladen.` : "Ich bin dabei.", time: "Jetzt" },
-      ],
-    };
-  });
+function toGroupThreads(groups: Group[], meId: string): ChatThread[] {
+  return groups.map((g) => ({
+    type: "group" as const, id: `group:${g.id}`, name: g.name,
+    subtitle: `${g.members.length} Mitglieder · ${g.ownerName}`, icon: "👥", group: g,
+    messages: [
+      { id:`${g.id}-g1`, senderId:g.ownerId,              text:`${g.ownerName} hat die Gruppe erstellt.`, time:"Jetzt" },
+      { id:`${g.id}-g2`, senderId:g.members[0]?.id??g.ownerId, text:g.members[0]?`${g.members[0].name} ist dabei.`:"Wer ist dabei?", time:"Jetzt" },
+      { id:`${g.id}-g3`, senderId:meId,                   text:g.members[1]?`${g.members[1].name} ist auch eingeladen.`:"Ich bin dabei.", time:"Jetzt" },
+    ],
+  }));
 }
 
-// ── Emoji Picker ─────────────────────────────────────────────────────────────
-function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
-  const [activeCat, setActiveCat] = useState(EMOJI_CATEGORIES[0].id);
-  const currentEmojis = EMOJI_CATEGORIES.find((c) => c.id === activeCat)?.emojis ?? [];
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function nowTime() {
+  const d = new Date();
+  return `${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`;
+}
 
+function getLastMsg(thread: ChatThread, local: Record<string,ChatMessage[]>): ChatMessage|null {
+  const all = [...thread.messages, ...(local[thread.id]??[])];
+  return all.length ? all[all.length-1] : null;
+}
+
+function getSenderName(senderId: string, thread: ChatThread): string {
+  if (thread.type === "party") {
+    if (senderId === thread.party.hostId) return thread.party.hostName;
+    return thread.party.members.find((m) => m.id === senderId)?.name ?? senderId;
+  }
+  if (thread.type === "group") {
+    if (senderId === thread.group.ownerId) return thread.group.ownerName;
+    return thread.group.members.find((m) => m.id === senderId)?.name ?? senderId;
+  }
+  return thread.name;
+}
+
+function formatTime(time?: string): string {
+  return time ?? "";
+}
+
+// ── EmojiPicker ───────────────────────────────────────────────────────────────
+function EmojiPicker({ onSelect }: { onSelect: (e: string) => void }) {
+  const [cat, setCat] = useState(EMOJI_CATEGORIES[0].id);
+  const emojis = EMOJI_CATEGORIES.find((c) => c.id === cat)?.emojis ?? [];
   return (
-    <View style={emojiStyles.panel}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={emojiStyles.catBar}
-        contentContainerStyle={emojiStyles.catBarContent}
-      >
-        {EMOJI_CATEGORIES.map((cat) => (
-          <Pressable
-            key={cat.id}
-            onPress={() => setActiveCat(cat.id)}
-            style={[emojiStyles.catBtn, activeCat === cat.id && emojiStyles.catBtnActive]}
-          >
-            <Text style={emojiStyles.catIcon}>{cat.icon}</Text>
+    <View style={ep.panel}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={ep.catBar} contentContainerStyle={ep.catBarContent}>
+        {EMOJI_CATEGORIES.map((c) => (
+          <Pressable key={c.id} onPress={() => setCat(c.id)} style={[ep.catBtn, cat === c.id && ep.catBtnOn]}>
+            <Text style={ep.catIcon}>{c.icon}</Text>
           </Pressable>
         ))}
       </ScrollView>
-      <ScrollView
-        contentContainerStyle={emojiStyles.grid}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="always"
-      >
-        {currentEmojis.map((emoji) => (
-          <Pressable
-            key={emoji}
-            onPress={() => onSelect(emoji)}
-            style={({ pressed }) => [emojiStyles.cell, pressed && emojiStyles.cellPressed]}
-          >
-            <Text style={emojiStyles.emoji}>{emoji}</Text>
+      <ScrollView contentContainerStyle={ep.grid} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="always">
+        {emojis.map((e) => (
+          <Pressable key={e} onPress={() => onSelect(e)} style={({ pressed }) => [ep.cell, pressed && ep.cellOn]}>
+            <Text style={ep.emoji}>{e}</Text>
           </Pressable>
         ))}
       </ScrollView>
     </View>
   );
 }
-
-const CELL_SIZE = 46;
-const emojiStyles = StyleSheet.create({
-  panel: {
-    height: EMOJI_PANEL_HEIGHT,
-    backgroundColor: Colors.light.backgroundTertiary,
-    borderTopWidth: 2,
-    borderTopColor: Colors.light.text,
-  },
+const ep = StyleSheet.create({
+  panel: { height: EMOJI_PANEL_H, backgroundColor: Colors.light.backgroundTertiary, borderTopWidth: 2, borderTopColor: Colors.light.text },
   catBar: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: Colors.light.separator },
   catBarContent: { paddingHorizontal: 10, paddingVertical: 6, gap: 4 },
-  catBtn: {
-    width: 42, height: 42,
-    borderRadius: Colors.shape.radiusSm,
-    alignItems: "center", justifyContent: "center",
-  },
-  catBtnActive: { backgroundColor: Colors.light.backgroundSecondary, borderWidth: 1.5, borderColor: Colors.light.tint },
+  catBtn: { width: 42, height: 42, borderRadius: Colors.shape.radiusSm, alignItems:"center", justifyContent:"center" },
+  catBtnOn: { backgroundColor: Colors.light.backgroundSecondary, borderWidth: 1.5, borderColor: Colors.light.tint },
   catIcon: { fontSize: 22 },
-  grid: {
-    flexDirection: "row", flexWrap: "wrap",
-    paddingHorizontal: 10, paddingVertical: 8, gap: 2,
-  },
-  cell: {
-    width: CELL_SIZE, height: CELL_SIZE,
-    alignItems: "center", justifyContent: "center",
-    borderRadius: Colors.shape.radiusSm,
-  },
-  cellPressed: { backgroundColor: Colors.light.backgroundSecondary },
+  grid: { flexDirection:"row", flexWrap:"wrap", paddingHorizontal: 10, paddingVertical: 8, gap: 2 },
+  cell: { width: 46, height: 46, alignItems:"center", justifyContent:"center", borderRadius: Colors.shape.radiusSm },
+  cellOn: { backgroundColor: Colors.light.backgroundSecondary },
   emoji: { fontSize: 26 },
 });
 
-function nowTime() {
-  const d = new Date();
-  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+// ── TypingDots ────────────────────────────────────────────────────────────────
+function TypingDots() {
+  const d1 = useRef(new Animated.Value(0)).current;
+  const d2 = useRef(new Animated.Value(0)).current;
+  const d3 = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.stagger(160, [d1, d2, d3].map((d) =>
+        Animated.sequence([
+          Animated.timing(d, { toValue:1, duration:280, useNativeDriver:true }),
+          Animated.timing(d, { toValue:0, duration:280, useNativeDriver:true }),
+        ])
+      ))
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [d1, d2, d3]);
+  return (
+    <View style={{ flexDirection:"row", alignItems:"center", gap:4 }}>
+      {[d1, d2, d3].map((d, i) => (
+        <Animated.View key={i} style={{
+          width:7, height:7, borderRadius:3.5,
+          backgroundColor: Colors.light.textSecondary,
+          opacity: d.interpolate({ inputRange:[0,1], outputRange:[0.3,1] }),
+          transform:[{ translateY: d.interpolate({ inputRange:[0,1], outputRange:[0,-4] }) }],
+        }} />
+      ))}
+    </View>
+  );
 }
 
-// ── Main screen ──────────────────────────────────────────────────────────────
+// ── MessageRow (swipe-to-reply + long-press) ──────────────────────────────────
+type MsgRowProps = {
+  message: ExtMsg;
+  mine: boolean;
+  isGroup: boolean;
+  senderName: string;
+  reactions: MsgReaction[];
+  isStarred: boolean;
+  onReply: (m: ExtMsg) => void;
+  onLongPress: (m: ExtMsg) => void;
+};
+
+function MessageRow({ message, mine, isGroup, senderName, reactions, isStarred, onReply, onLongPress }: MsgRowProps) {
+  const swipeX      = useRef(new Animated.Value(0)).current;
+  const cbRef       = useRef({ onReply, onLongPress, message });
+  const thresholdHit = useRef(false);
+  cbRef.current = { onReply, onLongPress, message };
+
+  // Resistance curve: full movement up to 36px, then 40% beyond
+  const applyResistance = (raw: number) => {
+    const abs = Math.abs(raw);
+    const clamped = abs > 36 ? 36 + (abs - 36) * 0.4 : abs;
+    return mine ? -clamped : clamped;
+  };
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gs) => {
+      // Respond quickly: 6px horizontal, lenient angle (1.3x) so diagonal swipes still work
+      const isHoriz = Math.abs(gs.dx) > 6 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.3;
+      return isHoriz && (mine ? gs.dx < -4 : gs.dx > 4);
+    },
+    onPanResponderGrant: () => {
+      thresholdHit.current = false;
+    },
+    onPanResponderMove: (_, gs) => {
+      const raw = mine ? Math.max(-90, Math.min(0, gs.dx)) : Math.min(90, Math.max(0, gs.dx));
+      swipeX.setValue(applyResistance(raw));
+
+      // Haptic pre-trigger at threshold so the user feels it before lifting finger
+      const dist = Math.abs(raw);
+      if (!thresholdHit.current && dist > 44) {
+        thresholdHit.current = true;
+        if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } else if (thresholdHit.current && dist <= 44) {
+        thresholdHit.current = false; // pulled back under threshold – reset
+      }
+    },
+    onPanResponderRelease: (_, gs) => {
+      const didTrigger = mine ? gs.dx < -44 : gs.dx > 44;
+      if (didTrigger) {
+        if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        cbRef.current.onReply(cbRef.current.message);
+      }
+      // Bounceback: more spring when threshold was crossed for a satisfying snap
+      Animated.spring(swipeX, {
+        toValue: 0,
+        useNativeDriver: true,
+        bounciness: didTrigger ? 10 : 4,
+        speed: didTrigger ? 14 : 20,
+      }).start();
+      thresholdHit.current = false;
+    },
+    onPanResponderTerminate: () => {
+      thresholdHit.current = false;
+      Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, bounciness: 2, speed: 20 }).start();
+    },
+  })).current;
+
+  const statusIcon = !mine ? "" :
+    message.status === "read"      ? "✓✓" :
+    message.status === "delivered" ? "✓✓" :
+    message.status === "sent"      ? "✓"  :
+    message.status === "sending"   ? "◷"  :
+    message.status === "failed"    ? "✕"  : "";
+
+  return (
+    <View>
+      <Animated.View style={{ transform:[{ translateX: swipeX }] }} {...pan.panHandlers}>
+        <Pressable
+          onLongPress={() => {
+            if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onLongPress(message);
+          }}
+          delayLongPress={420}
+        >
+          <View style={[st.msgRow, mine ? st.msgRowMine : st.msgRowTheirs]}>
+            <View style={st.bubbleCol}>
+              {/* Group sender name */}
+              {isGroup && !mine && (
+                <Text style={st.senderName}>{senderName}</Text>
+              )}
+              <View style={[st.bubble, mine ? st.bubbleMine : st.bubbleTheirs, message.status === "failed" && st.bubbleFailed]}>
+                {/* Reply preview */}
+                {message.replyTo && (
+                  <View style={[st.replyPreview, mine ? st.replyPreviewMine : st.replyPreviewTheirs]}>
+                    <Text style={st.replyPreviewName} numberOfLines={1}>{message.replyTo.senderName}</Text>
+                    <Text style={[st.replyPreviewText, mine ? st.replyPreviewTextMine : st.replyPreviewTextTheirs]} numberOfLines={2}>
+                      {message.replyTo.text}
+                    </Text>
+                  </View>
+                )}
+                {/* Image */}
+                {message.imageUri ? <Image source={{ uri: message.imageUri }} style={st.msgImg} contentFit="cover" /> : null}
+                {/* Text */}
+                {message.text ? (
+                  <Text style={[st.msgText, mine ? st.msgTextMine : st.msgTextTheirs]}>{message.text}</Text>
+                ) : null}
+                {/* Footer */}
+                <View style={st.msgFooter}>
+                  {isStarred ? <Text style={{ fontSize:10, marginRight:2 }}>⭐</Text> : null}
+                  <Text style={[st.msgTime, mine ? st.msgTimeMine : st.msgTimeTheirs]}>{message.time}</Text>
+                  {mine && statusIcon ? (
+                    <Text style={[st.msgStatus, message.status === "read" ? { color: Colors.light.tintBlue } : { color:"rgba(255,255,255,0.58)" }]}>
+                      {statusIcon}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            </View>
+          </View>
+        </Pressable>
+      </Animated.View>
+
+      {/* Reactions */}
+      {reactions.length > 0 && (
+        <View style={[st.reactRow, mine ? st.reactRowMine : st.reactRowTheirs]}>
+          {reactions.map((r) => (
+            <View key={r.emoji} style={[st.reactChip, r.mine && st.reactChipMine]}>
+              <Text style={st.reactEmoji}>{r.emoji}</Text>
+              {r.count > 1 && <Text style={st.reactCount}>{r.count}</Text>}
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const {
-    currentUser,
-    posts,
-    parties,
-    groups,
-    mapFriends,
-    localMessages,
-    addLocalMessage,
-    markThreadRead,
-  } = useApp();
+  const { currentUser, posts, parties, groups, mapFriends, localMessages, addLocalMessage, markThreadRead } = useApp();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
+  // View state
+  const [viewMode, setViewMode] = useState<"list"|"chat">("list");
   const [draft, setDraft] = useState("");
-  const scrollRef = useRef<ScrollView>(null);
-  const inputRef = useRef<TextInput>(null);
-
+  const [replyingTo, setReplyingTo] = useState<ExtMsg|null>(null);
+  const [actionTarget, setActionTarget] = useState<ExtMsg|null>(null);
+  const [localReactions, setLocalReactions] = useState<Record<string,MsgReaction[]>>({});
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
+  const [pinnedByThread, setPinnedByThread] = useState<Record<string,string>>({});
+  const [dismissedPins, setDismissedPins] = useState<Set<string>>(new Set());
+  const [typingIds, setTypingIds] = useState<Set<string>>(new Set());
+  const [unreadCounts, setUnreadCounts] = useState<Record<string,number>>({});
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [mediaModalOpen, setMediaModalOpen] = useState(false);
 
+  const scrollRef = useRef<ScrollView>(null);
+  const inputRef  = useRef<TextInput>(null);
+
+  // Build threads
   const contacts = useMemo(() => toChatContacts(posts.map((p) => p.user), currentUser.id), [currentUser.id, posts]);
-  const partyThreads = useMemo(() => toPartyThreads(parties, currentUser.id), [currentUser.id, parties]);
-  const groupThreads = useMemo(() => toGroupThreads(groups, currentUser.id), [currentUser.id, groups]);
+  const partyThreads  = useMemo(() => toPartyThreads(parties, currentUser.id), [currentUser.id, parties]);
+  const groupThreads  = useMemo(() => toGroupThreads(groups, currentUser.id), [currentUser.id, groups]);
   const profileThreads = useMemo<ChatThread[]>(
-    () => contacts.map((c) => ({ type: "profile", id: c.id, name: c.name, subtitle: c.status, avatar: c.avatar, messages: c.messages, username: c.username, status: c.status })),
+    () => contacts.map((c) => ({ type:"profile", id:c.id, name:c.name, subtitle:c.status, avatar:c.avatar, messages:c.messages, username:c.username, status:c.status })),
     [contacts],
   );
   const mapFriendThreads = useMemo<ChatThread[]>(
-    () =>
-      mapFriends.map((f) => ({
-        type: "profile",
-        id: f.id,
-        name: f.name,
-        subtitle: f.activity,
-        avatar: f.avatarUrl,
-        username: f.id,
-        status: f.activity,
-        messages: [
-          { id: `${f.id}-map-1`, senderId: f.id, text: f.activity, time: "Jetzt" },
-        ],
-      })),
+    () => mapFriends.map((f) => ({
+      type:"profile" as const, id:f.id, name:f.name, subtitle:f.activity,
+      avatar:f.avatarUrl, username:f.id, status:f.activity,
+      messages:[{ id:`${f.id}-map-1`, senderId:f.id, text:f.activity, time:"Jetzt" }],
+    })),
     [mapFriends],
   );
 
   const threads = useMemo(() => {
-    const profileIds = new Set(profileThreads.map((t) => t.id));
-    const newFriends = mapFriendThreads.filter((t) => !profileIds.has(t.id));
-    return [...partyThreads, ...groupThreads, ...newFriends, ...profileThreads];
+    const pids = new Set(profileThreads.map((t) => t.id));
+    return [...partyThreads, ...groupThreads, ...mapFriendThreads.filter((t) => !pids.has(t.id)), ...profileThreads];
   }, [groupThreads, mapFriendThreads, partyThreads, profileThreads]);
+
   const [selectedId, setSelectedId] = useState(threads[0]?.id ?? "");
   const selectedThread = useMemo(() => threads.find((t) => t.id === selectedId) ?? threads[0], [selectedId, threads]);
 
+  // Initialise unread counts once threads are known
+  useEffect(() => {
+    setUnreadCounts((prev) => {
+      const next = { ...prev };
+      threads.forEach((t, i) => {
+        if (!(t.id in next)) next[t.id] = i < 4 ? Math.floor(Math.random() * 6) + 1 : 0;
+      });
+      return next;
+    });
+  }, [threads.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep selectedId valid
   useEffect(() => {
     if (!threads.length) return;
     setSelectedId((cur) => (threads.some((t) => t.id === cur) ? cur : threads[0].id));
   }, [threads]);
 
+  // Mark read + typing sim when thread changes
   useEffect(() => {
     if (!selectedThread) return;
     void markThreadRead(selectedThread.id);
-  }, [markThreadRead, selectedThread]);
+    setUnreadCounts((p) => ({ ...p, [selectedThread.id]: 0 }));
+    if (Math.random() > 0.45) return;
+    let t2: ReturnType<typeof setTimeout>;
+    const t1 = setTimeout(() => {
+      setTypingIds((s) => new Set([...s, selectedThread.id]));
+      t2 = setTimeout(() => {
+        setTypingIds((s) => { const n = new Set(s); n.delete(selectedThread.id); return n; });
+      }, 1800 + Math.random() * 2400);
+    }, 900 + Math.random() * 1600);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [selectedThread?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const addMessage = useCallback((msg: ChatMessage) => {
+  const allMessages = useMemo(() => {
+    const msgs: ExtMsg[] = [
+      ...(selectedThread?.messages ?? []) as ExtMsg[],
+      ...(localMessages[selectedThread?.id ?? ""] ?? []) as ExtMsg[],
+    ];
+    const byKey = new Map<string, ExtMsg>();
+    msgs.forEach((m) => byKey.set(m.clientMessageId ?? m.id, m));
+    return Array.from(byKey.values()).sort((a, b) => {
+      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return at - bt;
+    });
+  }, [selectedThread, localMessages]);
+
+  const pinnedMessageId  = selectedThread ? (pinnedByThread[selectedThread.id] ?? null) : null;
+  const pinnedMessage    = pinnedMessageId ? allMessages.find((m) => m.id === pinnedMessageId) ?? null : null;
+  const showPinnedBanner = !!pinnedMessage && !dismissedPins.has(selectedThread?.id ?? "");
+  const isGroupThread    = selectedThread?.type === "party" || selectedThread?.type === "group";
+  const isTyping         = !!selectedThread && typingIds.has(selectedThread.id);
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+  const addMessage = useCallback((msg: ExtMsg) => {
     if (!selectedThread) return;
-    addLocalMessage(selectedThread.id, msg);
+    addLocalMessage(selectedThread.id, msg as ChatMessage);
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
   }, [selectedThread, addLocalMessage]);
 
   const handleSend = useCallback(() => {
     if (!draft.trim() || !selectedThread) return;
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = `client-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
     addMessage({
-      id: clientMessageId,
-      clientMessageId,
-      senderId: currentUser.id,
-      text: draft.trim(),
-      time: nowTime(),
-      createdAt: new Date().toISOString(),
-    });
+      id, clientMessageId: id, senderId: currentUser.id,
+      text: draft.trim(), time: nowTime(), createdAt: new Date().toISOString(),
+      ...(replyingTo ? { replyTo: { id: replyingTo.id, text: replyingTo.text || "📷 Foto", senderName: replyingTo.senderId === currentUser.id ? "Du" : getSenderName(replyingTo.senderId, selectedThread) } } : {}),
+    } as ExtMsg);
     setDraft("");
-  }, [addMessage, currentUser.id, draft, selectedThread]);
+    setReplyingTo(null);
+  }, [addMessage, currentUser.id, draft, replyingTo, selectedThread]);
 
-  const handleEmojiSelect = useCallback((emoji: string) => {
-    setDraft((d) => d + emoji);
+  const openThread = useCallback((id: string) => {
+    if (Platform.OS !== "web") Haptics.selectionAsync();
+    setSelectedId(id);
+    setEmojiOpen(false);
+    setReplyingTo(null);
+    setViewMode("chat");
   }, []);
 
-  const toggleEmoji = useCallback(() => {
-    if (!emojiOpen) inputRef.current?.blur();
-    setEmojiOpen((open) => !open);
-  }, [emojiOpen]);
+  const goBack = useCallback(() => {
+    setViewMode("list");
+    setEmojiOpen(false);
+    setReplyingTo(null);
+  }, []);
+
+  const handleReply = useCallback((msg: ExtMsg) => {
+    setReplyingTo(msg);
+    setEmojiOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, []);
+
+  const handleLongPress = useCallback((msg: ExtMsg) => {
+    setActionTarget(msg);
+  }, []);
+
+  const handleReact = useCallback((emoji: string) => {
+    if (!actionTarget) return;
+    const msgId = actionTarget.id;
+    setLocalReactions((prev) => {
+      const cur = [...(prev[msgId] ?? [])];
+      const idx = cur.findIndex((r) => r.emoji === emoji);
+      if (idx >= 0) {
+        if (cur[idx].mine) {
+          const updated = { ...cur[idx], count: cur[idx].count - 1, mine: false };
+          return { ...prev, [msgId]: updated.count <= 0 ? cur.filter((_, i) => i !== idx) : cur.map((r, i) => i === idx ? updated : r) };
+        }
+        return { ...prev, [msgId]: cur.map((r, i) => i === idx ? { ...r, count: r.count + 1, mine: true } : r) };
+      }
+      return { ...prev, [msgId]: [...cur, { emoji, count: 1, mine: true }] };
+    });
+    setActionTarget(null);
+  }, [actionTarget]);
+
+  const handleToggleStar = useCallback((msgId: string) => {
+    setStarredIds((s) => { const n = new Set(s); n.has(msgId) ? n.delete(msgId) : n.add(msgId); return n; });
+    setActionTarget(null);
+  }, []);
+
+  const handlePin = useCallback((msgId: string) => {
+    if (!selectedThread) return;
+    setPinnedByThread((p) => ({ ...p, [selectedThread.id]: p[selectedThread.id] === msgId ? "" : msgId }));
+    setDismissedPins((s) => { const n = new Set(s); n.delete(selectedThread.id); return n; });
+    setActionTarget(null);
+  }, [selectedThread]);
 
   const handlePickImage = useCallback(async () => {
     setMediaModalOpen(false);
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: "images",
-      quality: 0.85,
-      allowsEditing: true,
-    });
-    if (!result.canceled && result.assets[0]?.uri) {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes:"images", quality:0.85, allowsEditing:true });
+    if (!res.canceled && res.assets[0]?.uri) {
       if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const clientMessageId = `client-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      addMessage({
-        id: clientMessageId,
-        clientMessageId,
-        senderId: currentUser.id,
-        text: "",
-        time: nowTime(),
-        createdAt: new Date().toISOString(),
-        imageUri: result.assets[0].uri,
-      });
+      const id = `client-img-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+      addMessage({ id, clientMessageId:id, senderId:currentUser.id, text:"", time:nowTime(), createdAt:new Date().toISOString(), imageUri:res.assets[0].uri } as ExtMsg);
     }
   }, [addMessage, currentUser.id]);
 
@@ -413,22 +536,11 @@ export default function HomeScreen() {
     setMediaModalOpen(false);
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") return;
-    const result = await ImagePicker.launchCameraAsync({
-      quality: 0.85,
-      allowsEditing: true,
-    });
-    if (!result.canceled && result.assets[0]?.uri) {
+    const res = await ImagePicker.launchCameraAsync({ quality:0.85, allowsEditing:true });
+    if (!res.canceled && res.assets[0]?.uri) {
       if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const clientMessageId = `client-cam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      addMessage({
-        id: clientMessageId,
-        clientMessageId,
-        senderId: currentUser.id,
-        text: "",
-        time: nowTime(),
-        createdAt: new Date().toISOString(),
-        imageUri: result.assets[0].uri,
-      });
+      const id = `client-cam-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+      addMessage({ id, clientMessageId:id, senderId:currentUser.id, text:"", time:nowTime(), createdAt:new Date().toISOString(), imageUri:res.assets[0].uri } as ExtMsg);
     }
   }, [addMessage, currentUser.id]);
 
@@ -438,201 +550,271 @@ export default function HomeScreen() {
     return contacts.filter((c) => `${c.name} ${c.username} ${c.status}`.toLowerCase().includes(q));
   }, [contacts, searchQuery]);
 
-  const selectContact = useCallback((id: string) => {
-    if (Platform.OS !== "web") Haptics.selectionAsync();
-    setSelectedId(id);
-    setEmojiOpen(false);
-  }, []);
+  // ── Render: Conversation List ────────────────────────────────────────────────
+  const renderList = () => (
+    <View style={{ flex:1 }}>
+      {/* Header */}
+      <View style={[st.listHeader, { paddingTop: topPad + 8 }]}>
+        <Text style={st.listTitle}>Nachrichten</Text>
+        <View style={{ flexDirection:"row", gap:8 }}>
+          <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => router.push("/presence-choice")}>
+            <Feather name="home" size={21} color={Colors.light.onBright} />
+          </Pressable>
+          <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => { setSearchOpen(true); setEmojiOpen(false); }}>
+            <Feather name="search" size={20} color={Colors.light.onBright} />
+          </Pressable>
+        </View>
+      </View>
 
-  const allMessages = useMemo(
-    () => {
-      const messages = [...(selectedThread?.messages ?? []), ...(localMessages[selectedThread?.id ?? ""] ?? [])];
-      const byKey = new Map<string, ChatMessage>();
-      messages.forEach((message) => byKey.set(message.clientMessageId ?? message.id, message));
-      return Array.from(byKey.values()).sort((a, b) => {
-        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return aTime - bTime;
-      });
-    },
-    [selectedThread, localMessages],
+      {/* Thread rows */}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: TAB_BAR_H + (insets.bottom || 10) }}>
+        {threads.map((thread) => {
+          const lastMsg  = getLastMsg(thread, localMessages);
+          const lastText = lastMsg?.imageUri ? "📷 Foto" : (lastMsg?.text ?? "");
+          const unread   = unreadCounts[thread.id] ?? 0;
+          const typing   = typingIds.has(thread.id);
+          const isSelected = thread.id === selectedThread?.id;
+          return (
+            <Pressable
+              key={thread.id}
+              style={({ pressed }) => [st.threadRow, isSelected && st.threadRowSelected, { opacity: pressed ? 0.82 : 1 }]}
+              onPress={() => openThread(thread.id)}
+            >
+              {/* Avatar */}
+              <View style={st.threadAvatarWrap}>
+                {thread.type !== "profile"
+                  ? <View style={[st.threadAvatar, st.threadAvatarGroup]}><Text style={st.threadIcon}>{thread.icon}</Text></View>
+                  : <Image source={{ uri: (thread as {avatar:string}).avatar }} style={st.threadAvatar} contentFit="cover" />}
+                <View style={[st.threadOnlineDot, thread.type !== "profile" && st.threadPartyDot]} />
+              </View>
+
+              {/* Middle */}
+              <View style={st.threadMid}>
+                <Text style={st.threadName} numberOfLines={1}>{thread.name}</Text>
+                {typing ? (
+                  <View style={{ flexDirection:"row", alignItems:"center", gap:6, marginTop:3 }}>
+                    <TypingDots />
+                    <Text style={[st.threadLast, { color: Colors.light.tint, fontStyle:"italic" }]}>tippt...</Text>
+                  </View>
+                ) : (
+                  <Text style={[st.threadLast, unread > 0 && st.threadLastBold]} numberOfLines={1}>{lastText}</Text>
+                )}
+              </View>
+
+              {/* Right */}
+              <View style={st.threadRight}>
+                <Text style={[st.threadTime, unread > 0 && { color: Colors.light.tint }]}>{formatTime(lastMsg?.time)}</Text>
+                {unread > 0 && (
+                  <View style={st.badge}>
+                    <Text style={st.badgeText}>{unread > 99 ? "99+" : unread}</Text>
+                  </View>
+                )}
+              </View>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
   );
 
-  return (
+  // ── Render: Chat view ────────────────────────────────────────────────────────
+  const renderChat = () => (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={{ flex:1 }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 86 : 0}
     >
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: topPad + 8 }]}>
-        <Pressable style={({ pressed }) => [styles.headerBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => router.push("/presence-choice")}>
-          <Feather name="home" size={22} color={Colors.light.onBright} />
+      {/* Chat header */}
+      <View style={[st.chatHeader, { paddingTop: topPad + 4 }]}>
+        <Pressable style={({ pressed }) => [st.backBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={goBack}>
+          <Feather name="chevron-left" size={26} color={Colors.light.text} />
         </Pressable>
-        <Pressable style={({ pressed }) => [styles.headerBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => { setSearchOpen(true); setEmojiOpen(false); }}>
-          <Feather name="search" size={21} color={Colors.light.onBright} />
-        </Pressable>
-      </View>
-
-      {/* Contact list */}
-      <View style={styles.peopleWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.peopleList}>
-          {threads.map((thread) => {
-            const selected = thread.id === selectedThread?.id;
-            return (
-              <Pressable key={thread.id} style={({ pressed }) => [styles.person, selected && styles.personSelected, { opacity: pressed ? 0.75 : 1 }]} onPress={() => selectContact(thread.id)}>
-                <View style={[styles.avatarRing, thread.type !== "profile" && styles.partyRing, selected && styles.avatarRingSelected]}>
-                  {thread.type !== "profile"
-                    ? <Text style={styles.partyThreadIcon}>{thread.type === "party" ? "🎉" : "👥"}</Text>
-                    : <Image source={{ uri: thread.avatar }} style={styles.avatar} contentFit="cover" />}
-                  <View style={[styles.onlineDot, thread.type !== "profile" && styles.partyDot]} />
-                </View>
-                <Text style={[styles.personName, selected && styles.personNameSelected]} numberOfLines={1}>{thread.name}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {selectedThread ? (
-        <>
-          {/* Chat header */}
-          <View style={styles.chatHeader}>
-            {selectedThread.type !== "profile"
-              ? <View style={[styles.chatAvatar, styles.chatPartyAvatar]}><Text style={styles.chatPartyIcon}>{selectedThread.type === "party" ? "🎉" : "👥"}</Text></View>
-              : <Image source={{ uri: selectedThread.avatar }} style={styles.chatAvatar} contentFit="cover" />}
-            <View style={styles.chatHeaderText}>
-              <Text style={styles.chatName}>{selectedThread.name}</Text>
-              <Text style={styles.chatStatus} numberOfLines={1}>{selectedThread.subtitle}</Text>
+        {selectedThread?.type !== "profile"
+          ? <View style={[st.chatAvatar, st.chatAvatarGroup]}><Text style={st.chatGroupIcon}>{selectedThread?.icon ?? "👥"}</Text></View>
+          : <Image source={{ uri: (selectedThread as {avatar:string}).avatar }} style={st.chatAvatar} contentFit="cover" />}
+        <View style={st.chatHeaderMid}>
+          <Text style={st.chatName} numberOfLines={1}>{selectedThread?.name}</Text>
+          {isTyping ? (
+            <View style={{ flexDirection:"row", alignItems:"center", gap:6 }}>
+              <TypingDots />
+              <Text style={[st.chatStatus, { color: Colors.light.tint, fontStyle:"italic" }]}>tippt...</Text>
             </View>
-            <Pressable style={({ pressed }) => [styles.moreBtn, { opacity: pressed ? 0.7 : 1 }]}>
-              <Feather name="more-horizontal" size={21} color={Colors.light.textSecondary} />
+          ) : (
+            <Text style={st.chatStatus} numberOfLines={1}>{selectedThread?.subtitle}</Text>
+          )}
+        </View>
+        <View style={{ flexDirection:"row", gap:6 }}>
+          <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.7 : 1 }]}>
+            <Feather name="phone" size={19} color={Colors.light.textSecondary} />
+          </Pressable>
+          <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.7 : 1 }]}>
+            <Feather name="video" size={19} color={Colors.light.textSecondary} />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Pinned message banner */}
+      {showPinnedBanner && pinnedMessage && (
+        <Pressable style={st.pinnedBanner} onPress={() => {
+          scrollRef.current?.scrollToEnd({ animated: true });
+        }}>
+          <Feather name="bookmark" size={14} color={Colors.light.tint} style={{ marginRight:6 }} />
+          <View style={{ flex:1 }}>
+            <Text style={st.pinnedLabel}>Gepinnte Nachricht</Text>
+            <Text style={st.pinnedText} numberOfLines={1}>{pinnedMessage.text || "📷 Foto"}</Text>
+          </View>
+          <Pressable onPress={() => setDismissedPins((s) => new Set([...s, selectedThread?.id ?? ""]))} hitSlop={8}>
+            <Feather name="x" size={16} color={Colors.light.textSecondary} />
+          </Pressable>
+        </Pressable>
+      )}
+
+      {/* Messages */}
+      <ScrollView
+        ref={scrollRef}
+        style={st.msgs}
+        contentContainerStyle={st.msgsContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        onTouchStart={() => setEmojiOpen(false)}
+        onScrollBeginDrag={() => setEmojiOpen(false)}
+      >
+        {allMessages.map((msg) => {
+          const mine = msg.senderId === currentUser.id || msg.senderId === "me";
+          const name = !mine && selectedThread ? getSenderName(msg.senderId, selectedThread) : "Du";
+          const reactions = localReactions[msg.id] ?? [];
+          return (
+            <MessageRow
+              key={msg.id}
+              message={msg}
+              mine={mine}
+              isGroup={isGroupThread}
+              senderName={name}
+              reactions={reactions}
+              isStarred={starredIds.has(msg.id)}
+              onReply={handleReply}
+              onLongPress={handleLongPress}
+            />
+          );
+        })}
+
+        {/* Typing bubble */}
+        {isTyping && (
+          <View style={[st.msgRow, st.msgRowTheirs]}>
+            <View style={[st.bubble, st.bubbleTheirs, { paddingVertical:12, paddingHorizontal:14 }]}>
+              <TypingDots />
+            </View>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Reply strip */}
+      {replyingTo && (
+        <View style={st.replyStrip}>
+          <View style={st.replyStripBar} />
+          <View style={{ flex:1 }}>
+            <Text style={st.replyStripName}>{replyingTo.senderId === currentUser.id ? "Du" : getSenderName(replyingTo.senderId, selectedThread!)}</Text>
+            <Text style={st.replyStripText} numberOfLines={1}>{replyingTo.text || "📷 Foto"}</Text>
+          </View>
+          <Pressable onPress={() => setReplyingTo(null)} hitSlop={10}>
+            <Feather name="x" size={20} color={Colors.light.textSecondary} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* Composer */}
+      <View style={[st.composer, { paddingBottom: emojiOpen ? 8 : TAB_BAR_H + Math.max(insets.bottom, 10) }]}>
+        <View style={st.composerRow}>
+          <Pressable style={({ pressed }) => [st.mediaBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => { setMediaModalOpen(true); setEmojiOpen(false); }}>
+            <Feather name="image" size={21} color={Colors.light.tintBlue} />
+          </Pressable>
+          <View style={st.inputWrap}>
+            <TextInput
+              ref={inputRef}
+              value={draft}
+              onChangeText={setDraft}
+              onFocus={() => setEmojiOpen(false)}
+              placeholder={`Nachricht an ${selectedThread?.name ?? ""}`}
+              placeholderTextColor={Colors.light.textTertiary}
+              style={st.input}
+              multiline
+              returnKeyType="default"
+              blurOnSubmit={false}
+            />
+            <Pressable style={({ pressed }) => [st.emojiToggle, emojiOpen && st.emojiToggleOn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => { if (!emojiOpen) inputRef.current?.blur(); setEmojiOpen((o) => !o); }}>
+              <Text style={{ fontSize:22 }}>{emojiOpen ? "⌨️" : "😊"}</Text>
+            </Pressable>
+            <Pressable style={({ pressed }) => [st.sendBtn, { opacity: pressed ? 0.82 : 1 }]} onPress={handleSend}>
+              <Feather name="send" size={17} color="#FFFFFF" />
             </Pressable>
           </View>
+        </View>
+      </View>
 
-          {/* Messages */}
-          <ScrollView
-            ref={scrollRef}
-            style={styles.messages}
-            contentContainerStyle={styles.messagesContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            onTouchStart={() => setEmojiOpen(false)}
-            onScrollBeginDrag={() => setEmojiOpen(false)}
-          >
-            {allMessages.map((message) => {
-              const mine = message.senderId === currentUser.id || message.senderId === "me";
-              const statusLabel =
-                mine && message.status === "sending"
-                  ? " · sendet"
-                  : mine && message.status === "failed"
-                    ? " · fehlgeschlagen"
-                    : mine && message.status === "read"
-                      ? " · gelesen"
-                      : mine && message.status === "delivered"
-                        ? " · zugestellt"
-                        : mine && message.status === "sent"
-                          ? " · gesendet"
-                          : "";
-              return (
-                <View key={message.id} style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowTheirs]}>
-                  <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs, message.status === "failed" && styles.bubbleFailed]}>
-                    {message.imageUri ? (
-                      <>
-                        <Image source={{ uri: message.imageUri }} style={styles.messageImage} contentFit="cover" />
-                        {message.text ? <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextTheirs]}>{message.text}</Text> : null}
-                      </>
-                    ) : (
-                      <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextTheirs]}>{message.text}</Text>
-                    )}
-                    <Text style={[styles.messageTime, mine ? styles.messageTimeMine : styles.messageTimeTheirs, message.status === "failed" && styles.messageFailedText]}>
-                      {message.time}{statusLabel}
-                    </Text>
-                    {message.status === "failed" && message.failedReason ? (
-                      <Text style={styles.messageFailedReason} numberOfLines={2}>{message.failedReason}</Text>
-                    ) : null}
-                  </View>
-                </View>
-              );
-            })}
-          </ScrollView>
+      {/* Emoji panel */}
+      {emojiOpen && (
+        <View style={{ paddingBottom: TAB_BAR_H + Math.max(insets.bottom, 10) }}>
+          <EmojiPicker onSelect={(e) => setDraft((d) => d + e)} />
+        </View>
+      )}
+    </KeyboardAvoidingView>
+  );
 
-          {/* Composer */}
-          <View style={[styles.composer, { paddingBottom: emojiOpen ? 8 : TAB_BAR_OVERLAY_HEIGHT + Math.max(insets.bottom, 10) }]}>
-            <View style={styles.composerRow}>
-              {/* Media button */}
-              <Pressable
-                style={({ pressed }) => [styles.mediaBtn, { opacity: pressed ? 0.7 : 1 }]}
-                onPress={() => { setMediaModalOpen(true); setEmojiOpen(false); }}
-              >
-                <Feather name="image" size={21} color={Colors.light.tintBlue} />
+  // ── Root render ──────────────────────────────────────────────────────────────
+  return (
+    <View style={st.root}>
+      {viewMode === "list" ? renderList() : renderChat()}
+
+      {/* Message action modal */}
+      <Modal visible={!!actionTarget} transparent animationType="fade" onRequestClose={() => setActionTarget(null)}>
+        <Pressable style={st.actionOverlay} onPress={() => setActionTarget(null)}>
+          <Pressable style={st.actionSheet} onPress={(e) => e.stopPropagation()}>
+            {/* Quick reactions */}
+            <View style={st.quickReactRow}>
+              {QUICK_REACT.map((emoji) => {
+                const reacted = localReactions[actionTarget?.id ?? ""]?.find((r) => r.emoji === emoji && r.mine);
+                return (
+                  <Pressable key={emoji} onPress={() => handleReact(emoji)} style={({ pressed }) => [st.quickReactBtn, reacted && st.quickReactBtnOn, { opacity: pressed ? 0.75 : 1 }]}>
+                    <Text style={st.quickReactEmoji}>{emoji}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={st.actionDivider} />
+            {/* Actions */}
+            {([
+              { icon:"corner-up-left", label:"Antworten", fn: () => { handleReply(actionTarget!); setActionTarget(null); } },
+              { icon: starredIds.has(actionTarget?.id ?? "") ? "star" : "star", label: starredIds.has(actionTarget?.id ?? "") ? "Stern entfernen" : "Mit Stern markieren", fn: () => handleToggleStar(actionTarget?.id ?? "") },
+              { icon:"bookmark", label: pinnedByThread[selectedThread?.id ?? ""] === actionTarget?.id ? "Losgelöst" : "Pinnen", fn: () => handlePin(actionTarget?.id ?? "") },
+            ] as { icon: React.ComponentProps<typeof Feather>["name"]; label: string; fn: () => void }[]).map((item) => (
+              <Pressable key={item.label} style={({ pressed }) => [st.actionBtn, { opacity: pressed ? 0.75 : 1 }]} onPress={item.fn}>
+                <Feather name={item.icon} size={19} color={Colors.light.text} />
+                <Text style={st.actionBtnLabel}>{item.label}</Text>
               </Pressable>
-
-              {/* Input + emoji + send */}
-              <View style={styles.inputWrap}>
-                <TextInput
-                  ref={inputRef}
-                  value={draft}
-                  onChangeText={setDraft}
-                  onFocus={() => setEmojiOpen(false)}
-                  placeholder={`Nachricht an ${selectedThread.name}`}
-                  placeholderTextColor={Colors.light.textTertiary}
-                  style={styles.input}
-                  multiline
-                  returnKeyType="default"
-                  blurOnSubmit={false}
-                />
-                <Pressable
-                  style={({ pressed }) => [styles.emojiToggleBtn, emojiOpen && styles.emojiToggleBtnActive, { opacity: pressed ? 0.7 : 1 }]}
-                  onPress={toggleEmoji}
-                >
-                  <Text style={styles.emojiToggleIcon}>{emojiOpen ? "⌨️" : "😊"}</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.sendBtn, { opacity: pressed ? 0.82 : 1 }]}
-                  onPress={handleSend}
-                >
-                  <Feather name="send" size={17} color="#FFFFFF" />
-                </Pressable>
-              </View>
-            </View>
-          </View>
-
-          {/* Emoji panel */}
-          {emojiOpen && (
-            <View style={{ paddingBottom: TAB_BAR_OVERLAY_HEIGHT + Math.max(insets.bottom, 10) }}>
-              <EmojiPicker onSelect={handleEmojiSelect} />
-            </View>
-          )}
-        </>
-      ) : null}
+            ))}
+            <Pressable style={({ pressed }) => [st.actionCancelBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => setActionTarget(null)}>
+              <Text style={st.actionCancelText}>Abbrechen</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Media picker modal */}
       <Modal visible={mediaModalOpen} transparent animationType="slide" onRequestClose={() => setMediaModalOpen(false)}>
-        <Pressable style={styles.mediaOverlay} onPress={() => setMediaModalOpen(false)}>
-          <Pressable style={[styles.mediaSheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.mediaSheetHandle} />
-            <Text style={styles.mediaSheetTitle}>Foto senden</Text>
-            <Pressable style={({ pressed }) => [styles.mediaOption, { opacity: pressed ? 0.75 : 1 }]} onPress={handleTakePhoto}>
-              <View style={[styles.mediaOptionIcon, { backgroundColor: Colors.light.tint }]}>
-                <Feather name="camera" size={22} color="#fff" />
-              </View>
-              <View>
-                <Text style={styles.mediaOptionLabel}>Foto aufnehmen</Text>
-                <Text style={styles.mediaOptionSub}>Kamera öffnen</Text>
-              </View>
+        <Pressable style={st.mediaOverlay} onPress={() => setMediaModalOpen(false)}>
+          <Pressable style={[st.mediaSheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
+            <View style={st.sheetHandle} />
+            <Text style={st.sheetTitle}>Foto senden</Text>
+            <Pressable style={({ pressed }) => [st.mediaOption, { opacity: pressed ? 0.75 : 1 }]} onPress={handleTakePhoto}>
+              <View style={[st.mediaOptionIcon, { backgroundColor: Colors.light.tint }]}><Feather name="camera" size={22} color="#fff" /></View>
+              <View><Text style={st.mediaOptionLabel}>Foto aufnehmen</Text><Text style={st.mediaOptionSub}>Kamera öffnen</Text></View>
             </Pressable>
-            <Pressable style={({ pressed }) => [styles.mediaOption, { opacity: pressed ? 0.75 : 1 }]} onPress={handlePickImage}>
-              <View style={[styles.mediaOptionIcon, { backgroundColor: Colors.light.tintBlue }]}>
-                <Feather name="image" size={22} color="#fff" />
-              </View>
-              <View>
-                <Text style={styles.mediaOptionLabel}>Aus Galerie wählen</Text>
-                <Text style={styles.mediaOptionSub}>Foto aus der Bibliothek</Text>
-              </View>
+            <Pressable style={({ pressed }) => [st.mediaOption, { opacity: pressed ? 0.75 : 1 }]} onPress={handlePickImage}>
+              <View style={[st.mediaOptionIcon, { backgroundColor: Colors.light.tintBlue }]}><Feather name="image" size={22} color="#fff" /></View>
+              <View><Text style={st.mediaOptionLabel}>Aus Galerie wählen</Text><Text style={st.mediaOptionSub}>Foto aus der Bibliothek</Text></View>
             </Pressable>
-            <Pressable style={({ pressed }) => [styles.mediaCancelBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => setMediaModalOpen(false)}>
-              <Text style={styles.mediaCancelText}>Abbrechen</Text>
+            <Pressable style={({ pressed }) => [st.mediaCancelBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => setMediaModalOpen(false)}>
+              <Text style={st.mediaCancelText}>Abbrechen</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -640,249 +822,242 @@ export default function HomeScreen() {
 
       {/* Search modal */}
       <Modal visible={searchOpen} animationType="fade" transparent onRequestClose={() => { setSearchOpen(false); setSearchQuery(""); }}>
-        <Pressable style={styles.searchOverlay} onPress={() => { setSearchOpen(false); setSearchQuery(""); }}>
-          <Pressable style={styles.searchPanel} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.searchPanelHeader}>
-              <Text style={styles.searchTitle}>Profile suchen</Text>
-              <Pressable style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.72 : 1 }]} onPress={() => { setSearchOpen(false); setSearchQuery(""); }}>
+        <Pressable style={st.searchOverlay} onPress={() => { setSearchOpen(false); setSearchQuery(""); }}>
+          <Pressable style={st.searchPanel} onPress={(e) => e.stopPropagation()}>
+            <View style={st.searchPanelHeader}>
+              <Text style={st.searchTitle}>Profile suchen</Text>
+              <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.72 : 1 }]} onPress={() => { setSearchOpen(false); setSearchQuery(""); }}>
                 <Feather name="x" size={20} color={Colors.light.onBright} />
               </Pressable>
             </View>
-            <View style={styles.profileSearchInputWrap}>
+            <View style={st.searchInputWrap}>
               <Feather name="search" size={18} color={Colors.light.textSecondary} />
-              <TextInput value={searchQuery} onChangeText={setSearchQuery} autoFocus placeholder="Name oder Nutzername" placeholderTextColor={Colors.light.textTertiary} style={styles.profileSearchInput} />
+              <TextInput value={searchQuery} onChangeText={setSearchQuery} autoFocus placeholder="Name oder Nutzername" placeholderTextColor={Colors.light.textTertiary} style={st.searchInput} />
             </View>
-            <ScrollView style={styles.searchResults} contentContainerStyle={styles.searchResultsContent}>
-              {searchResults.map((contact) => (
-                <Pressable key={contact.id} style={({ pressed }) => [styles.searchResult, { opacity: pressed ? 0.78 : 1 }]} onPress={() => { selectContact(contact.id); setSearchOpen(false); setSearchQuery(""); }}>
-                  <Image source={{ uri: contact.avatar }} style={styles.searchResultAvatar} contentFit="cover" />
-                  <View style={styles.searchResultText}>
-                    <Text style={styles.searchResultName}>{contact.name}</Text>
-                    <Text style={styles.searchResultMeta} numberOfLines={1}>@{contact.username} · {contact.status}</Text>
+            <ScrollView style={{ maxHeight:360 }} contentContainerStyle={st.searchResultsContent}>
+              {searchResults.map((c) => (
+                <Pressable key={c.id} style={({ pressed }) => [st.searchResult, { opacity: pressed ? 0.78 : 1 }]} onPress={() => { openThread(c.id); setSearchOpen(false); setSearchQuery(""); }}>
+                  <Image source={{ uri: c.avatar }} style={st.searchResultAvatar} contentFit="cover" />
+                  <View style={{ flex:1, minWidth:0 }}>
+                    <Text style={st.searchResultName}>{c.name}</Text>
+                    <Text style={st.searchResultMeta} numberOfLines={1}>@{c.username} · {c.status}</Text>
                   </View>
                   <Feather name="message-circle" size={19} color={Colors.light.tint} />
                 </Pressable>
               ))}
               {!searchResults.length && (
-                <View style={styles.noResults}>
-                  <Text style={styles.noResultsTitle}>Nichts gefunden</Text>
-                  <Text style={styles.noResultsText}>Versuch einen anderen Namen.</Text>
+                <View style={{ alignItems:"center", paddingVertical:26, gap:4 }}>
+                  <Text style={{ fontSize:17, fontFamily:"Inter_700Bold", color:Colors.light.text }}>Nichts gefunden</Text>
+                  <Text style={{ fontSize:13, fontFamily:"Inter_400Regular", color:Colors.light.textSecondary }}>Versuch einen anderen Namen.</Text>
                 </View>
               )}
             </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-// ── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.light.background },
+// ── Styles ────────────────────────────────────────────────────────────────────
+const st = StyleSheet.create({
+  root: { flex:1, backgroundColor: Colors.light.background },
 
-  header: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 18, paddingBottom: 14,
+  // List header
+  listHeader: {
+    flexDirection:"row", alignItems:"center", justifyContent:"space-between",
+    paddingHorizontal:18, paddingBottom:14,
     backgroundColor: Colors.light.background,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
   },
-  headerBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: "center", justifyContent: "center",
+  listTitle: { fontSize:26, fontFamily:"Inter_700Bold", color:Colors.light.text },
+
+  // Thread rows (WhatsApp-style)
+  threadRow: {
+    flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:14,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
+    backgroundColor: Colors.light.background, gap:12,
+  },
+  threadRowSelected: { backgroundColor: Colors.light.backgroundSecondary },
+  threadAvatarWrap: { position:"relative" },
+  threadAvatar: { width:54, height:54, borderRadius:27, backgroundColor:Colors.light.backgroundSecondary, borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator },
+  threadAvatarGroup: { alignItems:"center", justifyContent:"center", backgroundColor: partySurf },
+  threadIcon: { fontSize:26 },
+  threadOnlineDot: { position:"absolute", right:1, bottom:1, width:14, height:14, borderRadius:7, backgroundColor:Colors.light.mint, borderWidth:2, borderColor:Colors.light.background },
+  threadPartyDot: { backgroundColor: Colors.light.tint },
+  threadMid: { flex:1, minWidth:0, gap:3 },
+  threadName: { fontSize:16, fontFamily:"Inter_700Bold", color:Colors.light.text },
+  threadLast: { fontSize:14, fontFamily:"Inter_400Regular", color:Colors.light.textSecondary },
+  threadLastBold: { fontFamily:"Inter_600SemiBold", color:Colors.light.text },
+  threadRight: { alignItems:"flex-end", gap:6, minWidth:48 },
+  threadTime: { fontSize:12, fontFamily:"Inter_400Regular", color:Colors.light.textTertiary },
+  badge: { minWidth:22, height:22, borderRadius:11, backgroundColor:Colors.light.tint, alignItems:"center", justifyContent:"center", paddingHorizontal:4 },
+  badgeText: { fontSize:12, fontFamily:"Inter_700Bold", color:"#fff" },
+
+  // Common header button
+  hBtn: {
+    width:40, height:40, borderRadius:20,
+    alignItems:"center", justifyContent:"center",
     backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
-    shadowColor: Colors.shadow.color,
-    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
-    shadowOpacity: Colors.shadow.opacity, shadowRadius: Colors.shadow.radius,
+    borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator,
   },
 
-  peopleWrap: { backgroundColor: Colors.light.background, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator },
-  peopleList: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 14, gap: 12 },
-  person: { width: 72, alignItems: "center", gap: 7 },
-  personSelected: { transform: [{ translateY: -1 }] },
-  avatarRing: {
-    width: 62, height: 62, borderRadius: 31, padding: 3,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
-    backgroundColor: Colors.light.backgroundSecondary,
-    shadowColor: Colors.shadow.color,
-    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
-    shadowOpacity: Colors.shadow.opacity, shadowRadius: Colors.shadow.radius,
-  },
-  avatarRingSelected: { borderColor: Colors.light.tint, backgroundColor: Colors.light.tint + "18" },
-  partyRing: { alignItems: "center", justifyContent: "center", backgroundColor: partyThreadSurface },
-  partyThreadIcon: { fontSize: 28, lineHeight: 34 },
-  avatar: { width: "100%", height: "100%", borderRadius: 28, backgroundColor: Colors.light.backgroundSecondary },
-  onlineDot: {
-    position: "absolute", right: 2, bottom: 4, width: 14, height: 14, borderRadius: 7,
-    borderWidth: Colors.shape.borderWidthThin, borderColor: Colors.light.background,
-    backgroundColor: Colors.light.mint,
-  },
-  partyDot: { backgroundColor: Colors.light.tint },
-  personName: { maxWidth: 68, fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.light.textSecondary },
-  personNameSelected: { color: Colors.light.text, fontFamily: "Inter_700Bold" },
-
+  // Chat header
   chatHeader: {
-    flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14, gap: 11,
+    flexDirection:"row", alignItems:"center", paddingHorizontal:12, paddingBottom:12, gap:10,
     backgroundColor: Colors.light.backgroundSecondary,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
   },
-  chatAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: Colors.light.backgroundSecondary, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator },
-  chatPartyAvatar: { alignItems: "center", justifyContent: "center", backgroundColor: partyThreadSurface },
-  chatPartyIcon: { fontSize: 24, lineHeight: 30 },
-  chatHeaderText: { flex: 1, minWidth: 0 },
-  chatName: { fontSize: 17, fontFamily: "Inter_700Bold", color: Colors.light.text },
-  chatStatus: { marginTop: 2, fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.light.textSecondary },
-  moreBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: utilityButtonSurface,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
-  },
+  backBtn: { width:36, height:36, alignItems:"center", justifyContent:"center" },
+  chatAvatar: { width:44, height:44, borderRadius:22, backgroundColor:Colors.light.backgroundSecondary, borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator },
+  chatAvatarGroup: { alignItems:"center", justifyContent:"center", backgroundColor: partySurf },
+  chatGroupIcon: { fontSize:22 },
+  chatHeaderMid: { flex:1, minWidth:0 },
+  chatName: { fontSize:16, fontFamily:"Inter_700Bold", color:Colors.light.text },
+  chatStatus: { fontSize:12, fontFamily:"Inter_400Regular", color:Colors.light.textSecondary, marginTop:1 },
 
-  messages: { flex: 1 },
-  messagesContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 18, gap: 10, backgroundColor: Colors.light.background },
-  messageRow: { width: "100%", flexDirection: "row" },
-  messageRowMine: { justifyContent: "flex-end" },
-  messageRowTheirs: { justifyContent: "flex-start" },
+  // Pinned banner
+  pinnedBanner: {
+    flexDirection:"row", alignItems:"center",
+    paddingHorizontal:14, paddingVertical:10,
+    backgroundColor: Colors.light.backgroundTertiary,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
+  },
+  pinnedLabel: { fontSize:10, fontFamily:"Inter_700Bold", color:Colors.light.tint, textTransform:"uppercase", letterSpacing:0.5 },
+  pinnedText: { fontSize:13, fontFamily:"Inter_400Regular", color:Colors.light.text, marginTop:1 },
+
+  // Messages
+  msgs: { flex:1 },
+  msgsContent: { paddingHorizontal:14, paddingTop:14, paddingBottom:18, gap:6, backgroundColor:Colors.light.background },
+
+  // Message row
+  msgRow: { width:"100%", flexDirection:"row", marginBottom:2 },
+  msgRowMine: { justifyContent:"flex-end" },
+  msgRowTheirs: { justifyContent:"flex-start" },
+  bubbleCol: { maxWidth:"80%", gap:2 },
+  senderName: { fontSize:11, fontFamily:"Inter_700Bold", color:Colors.light.tint, marginLeft:4, marginBottom:1 },
   bubble: {
-    maxWidth: "78%", borderRadius: 18,
-    paddingHorizontal: 13, paddingVertical: 10,
-    borderWidth: 0,
-    shadowColor: Colors.shadow.color,
-    shadowOffset: { width: 0, height: Colors.shadow.offsetY },
-    shadowOpacity: 0.18, shadowRadius: Colors.shadow.radius,
+    borderRadius:18, paddingHorizontal:13, paddingVertical:9,
+    shadowColor:Colors.shadow.color, shadowOffset:{ width:0, height:Colors.shadow.offsetY },
+    shadowOpacity:0.16, shadowRadius:Colors.shadow.radius,
   },
   bubbleMine: { backgroundColor: Colors.light.tint },
   bubbleTheirs: { backgroundColor: Colors.light.tintBlue },
-  bubbleFailed: { backgroundColor: "#FF375F", opacity: 0.92 },
-  messageImage: { width: 200, height: 160, borderRadius: 8, marginBottom: 4 },
-  messageText: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 21 },
-  messageTextMine: { color: "#FFFFFF" },
-  messageTextTheirs: { color: Colors.light.onBright },
-  messageTime: { marginTop: 5, fontSize: 10, fontFamily: "Inter_500Medium", alignSelf: "flex-end" },
-  messageTimeMine: { color: "rgba(255,255,255,0.72)" },
-  messageTimeTheirs: { color: Colors.light.textTertiary },
-  messageFailedText: { color: "rgba(255,255,255,0.9)" },
-  messageFailedReason: {
-    marginTop: 4,
-    fontSize: 10,
-    lineHeight: 14,
-    fontFamily: "Inter_500Medium",
-    color: "rgba(255,255,255,0.9)",
-  },
+  bubbleFailed: { backgroundColor:"#FF375F", opacity:0.92 },
+  replyPreview: { borderRadius:8, marginBottom:6, paddingHorizontal:9, paddingVertical:6, borderLeftWidth:3 },
+  replyPreviewMine: { backgroundColor:"rgba(255,255,255,0.18)", borderLeftColor:"rgba(255,255,255,0.7)" },
+  replyPreviewTheirs: { backgroundColor:"rgba(0,0,0,0.08)", borderLeftColor:Colors.light.tint },
+  replyPreviewName: { fontSize:11, fontFamily:"Inter_700Bold", color:"rgba(255,255,255,0.85)", marginBottom:2 },
+  replyPreviewText: { fontSize:12, fontFamily:"Inter_400Regular" },
+  replyPreviewTextMine: { color:"rgba(255,255,255,0.75)" },
+  replyPreviewTextTheirs: { color:Colors.light.textSecondary },
+  msgImg: { width:200, height:160, borderRadius:10, marginBottom:4 },
+  msgText: { fontSize:15, fontFamily:"Inter_400Regular", lineHeight:21 },
+  msgTextMine: { color:"#FFFFFF" },
+  msgTextTheirs: { color:"#000000" },
+  msgFooter: { flexDirection:"row", alignItems:"center", justifyContent:"flex-end", marginTop:4, gap:3 },
+  msgTime: { fontSize:10, fontFamily:"Inter_500Medium" },
+  msgTimeMine: { color:"rgba(255,255,255,0.62)" },
+  msgTimeTheirs: { color:"rgba(0,0,0,0.45)" },
+  msgStatus: { fontSize:11, fontFamily:"Inter_600SemiBold" },
 
-  composer: {
-    paddingHorizontal: 14, paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.light.separator,
-    backgroundColor: Colors.light.background,
+
+  // Reactions
+  reactRow: { flexDirection:"row", flexWrap:"wrap", gap:4, marginBottom:4, marginTop:2 },
+  reactRowMine: { justifyContent:"flex-end", paddingRight:6 },
+  reactRowTheirs: { justifyContent:"flex-start", paddingLeft:6 },
+  reactChip: {
+    flexDirection:"row", alignItems:"center", gap:2,
+    paddingHorizontal:7, paddingVertical:3, borderRadius:12,
+    backgroundColor:Colors.light.backgroundSecondary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator,
   },
-  composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, marginBottom: 8 },
+  reactChipMine: { borderColor:Colors.light.tint, backgroundColor: Colors.light.tint + "18" },
+  reactEmoji: { fontSize:14 },
+  reactCount: { fontSize:11, fontFamily:"Inter_700Bold", color:Colors.light.textSecondary },
+
+  // Reply strip
+  replyStrip: {
+    flexDirection:"row", alignItems:"center", gap:10,
+    paddingHorizontal:14, paddingVertical:10,
+    backgroundColor:Colors.light.backgroundSecondary,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor:Colors.light.tint,
+  },
+  replyStripBar: { width:3, height:"100%", borderRadius:2, backgroundColor:Colors.light.tint, alignSelf:"stretch" },
+  replyStripName: { fontSize:12, fontFamily:"Inter_700Bold", color:Colors.light.tint },
+  replyStripText: { fontSize:13, fontFamily:"Inter_400Regular", color:Colors.light.textSecondary, marginTop:1 },
+
+  // Composer
+  composer: {
+    paddingHorizontal:14, paddingTop:10,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor:Colors.light.separator,
+    backgroundColor:Colors.light.background,
+  },
+  composerRow: { flexDirection:"row", alignItems:"flex-end", gap:8, marginBottom:8 },
   mediaBtn: {
-    width: 42, height: 42, borderRadius: 21,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
+    width:42, height:42, borderRadius:21,
+    alignItems:"center", justifyContent:"center",
+    backgroundColor:Colors.light.backgroundSecondary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator,
   },
   inputWrap: {
-    flex: 1, minHeight: 48, borderRadius: 24,
-    backgroundColor: Colors.light.backgroundSecondary,
-    flexDirection: "row", alignItems: "flex-end",
-    paddingLeft: 14, paddingRight: 6, paddingVertical: 4,
-    gap: 4,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
+    flex:1, minHeight:48, borderRadius:24,
+    backgroundColor:Colors.light.backgroundSecondary,
+    flexDirection:"row", alignItems:"flex-end",
+    paddingLeft:14, paddingRight:6, paddingVertical:4, gap:4,
+    borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator,
   },
-  input: {
-    flex: 1, minHeight: 38, maxHeight: 120,
-    fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.light.text,
-    paddingVertical: 6,
-  },
-  emojiToggleBtn: {
-    width: 36, height: 36, borderRadius: Colors.shape.radiusSm,
-    alignItems: "center", justifyContent: "center",
-    marginBottom: 2,
-  },
-  emojiToggleBtnActive: { backgroundColor: Colors.light.backgroundTertiary },
-  emojiToggleIcon: { fontSize: 22 },
-  sendBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: Colors.light.tint,
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 0,
-    marginBottom: 2,
-  },
+  input: { flex:1, minHeight:38, maxHeight:120, fontSize:15, fontFamily:"Inter_400Regular", color:Colors.light.text, paddingVertical:6 },
+  emojiToggle: { width:36, height:36, borderRadius:10, alignItems:"center", justifyContent:"center", marginBottom:2 },
+  emojiToggleOn: { backgroundColor:Colors.light.backgroundTertiary },
+  sendBtn: { width:38, height:38, borderRadius:19, backgroundColor:Colors.light.tint, alignItems:"center", justifyContent:"center", marginBottom:2 },
 
-  mediaOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.45)" },
-  mediaSheet: {
-    backgroundColor: Colors.light.background,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    paddingTop: 12, paddingHorizontal: 20, gap: 12,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.light.separator,
+  // Action modal
+  actionOverlay: { flex:1, justifyContent:"flex-end", backgroundColor:"rgba(0,0,0,0.42)" },
+  actionSheet: {
+    backgroundColor:Colors.light.background,
+    borderTopLeftRadius:22, borderTopRightRadius:22,
+    paddingTop:14, paddingHorizontal:18, paddingBottom:32,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor:Colors.light.separator,
+    gap:6,
   },
-  mediaSheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.light.separator, alignSelf: "center", marginBottom: 8 },
-  mediaSheetTitle: { fontSize: 18, fontFamily: "Inter_700Bold", color: Colors.light.text, marginBottom: 4 },
-  mediaOption: {
-    flexDirection: "row", alignItems: "center", gap: 16,
-    paddingVertical: 14, paddingHorizontal: 16,
-    borderRadius: Colors.shape.radiusMd,
-    backgroundColor: Colors.light.backgroundSecondary,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
+  quickReactRow: { flexDirection:"row", justifyContent:"space-around", paddingVertical:10 },
+  quickReactBtn: { width:48, height:48, borderRadius:24, alignItems:"center", justifyContent:"center", backgroundColor:Colors.light.backgroundSecondary },
+  quickReactBtnOn: { backgroundColor:Colors.light.tint + "28", borderWidth:1.5, borderColor:Colors.light.tint },
+  quickReactEmoji: { fontSize:26 },
+  actionDivider: { height: StyleSheet.hairlineWidth, backgroundColor:Colors.light.separator, marginVertical:4 },
+  actionBtn: {
+    flexDirection:"row", alignItems:"center", gap:14,
+    paddingVertical:14, paddingHorizontal:16, borderRadius:Colors.shape.radiusMd,
+    backgroundColor:Colors.light.backgroundSecondary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator,
   },
-  mediaOptionIcon: { width: 48, height: 48, borderRadius: Colors.shape.radiusSm, alignItems: "center", justifyContent: "center" },
-  mediaOptionLabel: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.light.text },
-  mediaOptionSub: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.light.textSecondary, marginTop: 2 },
-  mediaCancelBtn: { alignItems: "center", paddingVertical: 14 },
-  mediaCancelText: { fontSize: 16, fontFamily: "Inter_500Medium", color: Colors.light.textSecondary },
+  actionBtnLabel: { fontSize:16, fontFamily:"Inter_500Medium", color:Colors.light.text },
+  actionCancelBtn: { alignItems:"center", paddingVertical:14, marginTop:4 },
+  actionCancelText: { fontSize:16, fontFamily:"Inter_500Medium", color:Colors.light.textSecondary },
 
-  searchOverlay: { flex: 1, justifyContent: "center", paddingHorizontal: 20, backgroundColor: "rgba(21,34,56,0.42)" },
-  searchPanel: {
-    maxHeight: "72%", borderRadius: Colors.shape.radiusLg,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
-    backgroundColor: Colors.light.background,
-    shadowColor: Colors.shadow.color,
-    shadowOffset: { width: 0, height: Colors.shadow.offsetY + 4 },
-    shadowOpacity: Colors.shadow.opacity + 0.06, shadowRadius: Colors.shadow.radius,
-    overflow: "hidden",
-  },
-  searchPanelHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.light.separator,
-    backgroundColor: Colors.light.backgroundTertiary,
-  },
-  searchTitle: {
-    fontSize: 22, fontFamily: "Inter_700Bold", color: Colors.light.text,
-    textShadowColor: "transparent",
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 0,
-  },
-  closeBtn: {
-    width: 34, height: 34, borderRadius: 17,
-    alignItems: "center", justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
-    backgroundColor: Colors.light.backgroundSecondary,
-  },
-  profileSearchInputWrap: {
-    minHeight: 50, margin: 14, paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
-    backgroundColor: Colors.light.backgroundSecondary,
-    flexDirection: "row", alignItems: "center", gap: 8,
-  },
-  profileSearchInput: { flex: 1, minHeight: 46, fontSize: 16, fontFamily: "Inter_400Regular", color: Colors.light.text },
-  searchResults: { maxHeight: 360 },
-  searchResultsContent: { paddingHorizontal: 14, paddingBottom: 14, gap: 10 },
-  searchResult: {
-    minHeight: 68, borderRadius: Colors.shape.radiusMd,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator,
-    backgroundColor: Colors.light.backgroundSecondary,
-    flexDirection: "row", alignItems: "center", paddingHorizontal: 10, gap: 10,
-  },
-  searchResultAvatar: { width: 46, height: 46, borderRadius: 23, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.light.separator, backgroundColor: Colors.light.backgroundSecondary },
-  searchResultText: { flex: 1, minWidth: 0 },
-  searchResultName: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.light.text },
-  searchResultMeta: { marginTop: 2, fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.light.textSecondary },
-  noResults: { alignItems: "center", paddingVertical: 26, gap: 4 },
-  noResultsTitle: { fontSize: 17, fontFamily: "Inter_700Bold", color: Colors.light.text },
-  noResultsText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.light.textSecondary },
+  // Media modal
+  mediaOverlay: { flex:1, justifyContent:"flex-end", backgroundColor:"rgba(0,0,0,0.45)" },
+  mediaSheet: { backgroundColor:Colors.light.background, borderTopLeftRadius:20, borderTopRightRadius:20, paddingTop:12, paddingHorizontal:20, gap:12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor:Colors.light.separator },
+  sheetHandle: { width:40, height:4, borderRadius:2, backgroundColor:Colors.light.separator, alignSelf:"center", marginBottom:8 },
+  sheetTitle: { fontSize:18, fontFamily:"Inter_700Bold", color:Colors.light.text, marginBottom:4 },
+  mediaOption: { flexDirection:"row", alignItems:"center", gap:16, paddingVertical:14, paddingHorizontal:16, borderRadius:Colors.shape.radiusMd, backgroundColor:Colors.light.backgroundSecondary, borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator },
+  mediaOptionIcon: { width:48, height:48, borderRadius:Colors.shape.radiusSm, alignItems:"center", justifyContent:"center" },
+  mediaOptionLabel: { fontSize:16, fontFamily:"Inter_700Bold", color:Colors.light.text },
+  mediaOptionSub: { fontSize:13, fontFamily:"Inter_400Regular", color:Colors.light.textSecondary, marginTop:2 },
+  mediaCancelBtn: { alignItems:"center", paddingVertical:14 },
+  mediaCancelText: { fontSize:16, fontFamily:"Inter_500Medium", color:Colors.light.textSecondary },
+
+  // Search modal
+  searchOverlay: { flex:1, justifyContent:"center", paddingHorizontal:20, backgroundColor:"rgba(21,34,56,0.42)" },
+  searchPanel: { maxHeight:"72%", borderRadius:Colors.shape.radiusLg, borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator, backgroundColor:Colors.light.background, overflow:"hidden" },
+  searchPanelHeader: { flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:16, paddingVertical:14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor:Colors.light.separator, backgroundColor:Colors.light.backgroundTertiary },
+  searchTitle: { fontSize:22, fontFamily:"Inter_700Bold", color:Colors.light.text },
+  searchInputWrap: { minHeight:50, margin:14, paddingHorizontal:12, borderRadius:20, borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator, backgroundColor:Colors.light.backgroundSecondary, flexDirection:"row", alignItems:"center", gap:8 },
+  searchInput: { flex:1, minHeight:46, fontSize:16, fontFamily:"Inter_400Regular", color:Colors.light.text },
+  searchResultsContent: { paddingHorizontal:14, paddingBottom:14, gap:10 },
+  searchResult: { minHeight:68, borderRadius:Colors.shape.radiusMd, borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator, backgroundColor:Colors.light.backgroundSecondary, flexDirection:"row", alignItems:"center", paddingHorizontal:10, gap:10 },
+  searchResultAvatar: { width:46, height:46, borderRadius:23, borderWidth: StyleSheet.hairlineWidth, borderColor:Colors.light.separator, backgroundColor:Colors.light.backgroundSecondary },
+  searchResultName: { fontSize:16, fontFamily:"Inter_700Bold", color:Colors.light.text },
+  searchResultMeta: { marginTop:2, fontSize:12, fontFamily:"Inter_400Regular", color:Colors.light.textSecondary },
 });

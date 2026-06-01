@@ -11,6 +11,8 @@ import React, {
 } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
+import { supabase } from "@/lib/supabase";
+
 export type HomeLocation = {
   name: string;
   address?: string;
@@ -121,18 +123,48 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const loadSaved = async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      if (data.homeLocation) {
-        setHomeLocationState(data.homeLocation);
+      let homeLoc: HomeLocation | null = null;
+
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data.homeLocation?.address && data.homeLocation?.lat && data.homeLocation?.lng) {
+          homeLoc = data.homeLocation;
+        }
+      }
+
+      // Fallback: load from Supabase profile if AsyncStorage has no location
+      if (!homeLoc) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("home_lat, home_lng, home_location_name")
+            .eq("id", user.id)
+            .maybeSingle();
+          if (profile?.home_lat && profile.home_lng) {
+            homeLoc = {
+              name: "Daheim",
+              // Use home_location_name as address fallback so routing check passes
+              address: profile.home_location_name ?? "Daheim",
+              lat: profile.home_lat,
+              lng: profile.home_lng,
+            };
+            // Restore into AsyncStorage so routing logic works on next cold start
+            await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ homeLocation: homeLoc }));
+            await AsyncStorage.setItem("locals_onboarding_seen", "1");
+          }
+        }
+      }
+
+      if (homeLoc) {
+        setHomeLocationState(homeLoc);
         setHasCompletedSetup(true);
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status === "granted") {
           setGpsGranted(true);
-          await detectCurrentLocation(data.homeLocation);
+          await detectCurrentLocation(homeLoc);
         } else {
-          // No GPS permission → fall back to home location
-          setCurrentLocationName(data.homeLocation.name || "Daheim");
+          setCurrentLocationName(homeLoc.name || "Daheim");
           setLocationMode("home");
         }
       }
@@ -155,6 +187,18 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       setCurrentLocationName(loc.name || "Daheim");
       setLocationMode("home");
     }
+    // Persist lat/lng to Supabase so the home zone survives reinstalls and device changes
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from("profiles").update({
+          home_lat: loc.lat,
+          home_lng: loc.lng,
+          // home_address saved when migration 20260601120000 is applied
+          ...(loc.address ? { home_address: loc.address } : {}),
+        }).eq("id", user.id);
+      }
+    } catch (_) {}
   }, []);
 
   const refreshLocation = useCallback(async () => {

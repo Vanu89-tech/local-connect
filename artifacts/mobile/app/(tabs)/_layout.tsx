@@ -29,6 +29,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "plus.circle", selected: "plus.circle.fill" }} />
         <Label>Create</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="simulation-lab">
+        <Icon sf={{ default: "figure.walk", selected: "figure.walk.circle.fill" }} />
+        <Label>Sim</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <Icon sf={{ default: "person", selected: "person.fill" }} />
         <Label>Profile</Label>
@@ -124,6 +128,18 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="simulation-lab"
+        options={{
+          title: "Sim",
+          tabBarIcon: ({ color }) =>
+            isIOS ? (
+              <SymbolView name="figure.walk" tintColor={color} size={24} />
+            ) : (
+              <Feather name="cpu" size={22} color={color} />
+            ),
+        }}
+      />
+<Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
