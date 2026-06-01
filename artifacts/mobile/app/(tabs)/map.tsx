@@ -41,8 +41,9 @@ const ONLINE_STALE_MINUTES = 20;
 const LIVE_POI_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_POI_RADIUS_METERS = 1800;
 const LIVE_POI_LIMIT = 180;
-const DEV_SIMULATED_STRANGER_COUNT = 50;
-const DEV_SIMULATED_FRIEND_COUNT = 10;
+const SIMULATION_ENABLED = __DEV__;
+const SIMULATION_FRIEND_COUNT = 10;
+const SIMULATION_LOCAL_COUNT = 46;
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 
 // Mock seed parties (relative to home location)
@@ -95,6 +96,29 @@ type MapUser = {
   isFriend?: boolean;
 };
 
+type MapMotion = {
+  speed: number;
+  heading: number | null;
+};
+
+type SimulatedMapAgent = {
+  id: string;
+  name: string;
+  isFriend: boolean;
+  intent: MapUser["intent"];
+  avatarUrl: string;
+  baseNorthM: number;
+  baseEastM: number;
+  orbitRadiusM: number;
+  phase: number;
+  angularSpeed: number;
+};
+
+type SimulatedMapSnapshot = {
+  users: MapUser[];
+  motion: Record<string, MapMotion>;
+};
+
 type LivePoiCategory = "transit" | "school" | "worship" | "food" | "shop" | "green";
 
 type LivePoi = {
@@ -123,6 +147,88 @@ type OverpassElement = {
   center?: { lat: number; lon: number };
   tags?: Record<string, string>;
 };
+
+function metersToLat(meters: number) {
+  return meters / 111_320;
+}
+
+function metersToLng(meters: number, atLat: number) {
+  const divisor = 111_320 * Math.max(0.2, Math.cos((atLat * Math.PI) / 180));
+  return meters / divisor;
+}
+
+function stableUnit(seed: number) {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function buildSimulatedMapAgents(): SimulatedMapAgent[] {
+  if (!SIMULATION_ENABLED) return [];
+  const total = SIMULATION_FRIEND_COUNT + SIMULATION_LOCAL_COUNT;
+  return Array.from({ length: total }, (_, index) => {
+    const isFriend = index < SIMULATION_FRIEND_COUNT;
+    const localIndex = isFriend ? index : index - SIMULATION_FRIEND_COUNT;
+    const ring = isFriend ? Math.floor(index / 4) : Math.floor(localIndex / 10);
+    const countForRing = isFriend ? SIMULATION_FRIEND_COUNT : SIMULATION_LOCAL_COUNT;
+    const angle = (localIndex / countForRing) * Math.PI * 2 + ring * 0.61 + (isFriend ? 0.28 : 0);
+    const baseDistance = isFriend
+      ? 260 + ring * 140 + (index % 4) * 34
+      : 330 + ring * 210 + (localIndex % 6) * 48;
+    const intentSeed = stableUnit(index + 7);
+    const intent: MapUser["intent"] = isFriend
+      ? "active"
+      : intentSeed > 0.84
+        ? "relationship"
+        : intentSeed > 0.68
+          ? "friend"
+          : "active";
+
+    return {
+      id: isFriend ? `sim-friend-${index + 1}` : `sim-local-${localIndex + 1}`,
+      name: isFriend ? `Freund ${index + 1}` : `Local ${localIndex + 1}`,
+      isFriend,
+      intent,
+      avatarUrl: `https://api.dicebear.com/9.x/thumbs/png?seed=${isFriend ? "friend" : "local"}-${index + 1}`,
+      baseNorthM: Math.sin(angle) * baseDistance,
+      baseEastM: Math.cos(angle) * baseDistance,
+      orbitRadiusM: isFriend ? 10 + (index % 3) * 5 : 14 + (localIndex % 5) * 6,
+      phase: stableUnit(index + 17) * Math.PI * 2,
+      angularSpeed: (isFriend ? 0.012 : 0.018) + stableUnit(index + 29) * 0.012,
+    };
+  });
+}
+
+function getSimulatedMapSnapshot(
+  agents: SimulatedMapAgent[],
+  origin: { lat: number; lng: number } | null,
+): SimulatedMapSnapshot {
+  if (!origin || agents.length === 0) return { users: [], motion: {} };
+  const users: MapUser[] = [];
+  const motion: Record<string, MapMotion> = {};
+
+  agents.forEach((agent) => {
+    const theta = agent.phase;
+    const northM = agent.baseNorthM + Math.sin(theta) * agent.orbitRadiusM;
+    const eastM = agent.baseEastM + Math.cos(theta) * agent.orbitRadiusM;
+
+    users.push({
+      id: agent.id,
+      name: agent.name,
+      lat: origin.lat + metersToLat(northM),
+      lng: origin.lng + metersToLng(eastM, origin.lat),
+      avatarUrl: agent.avatarUrl,
+      intent: agent.intent,
+      isFriend: agent.isFriend,
+    });
+
+    motion[agent.id] = {
+      speed: 0,
+      heading: null,
+    };
+  });
+
+  return { users, motion };
+}
 
 function areMapUsersEqual(a: MapUser[], b: MapUser[]): boolean {
   if (a.length !== b.length) return false;
@@ -798,6 +904,8 @@ function buildMapHtml(
     .fig {
       position: relative; display: flex; flex-direction: column; align-items: center;
       gap: 1px; cursor: pointer;
+      transform: scale(var(--symbol-scale, 1));
+      transform-origin: 50% 100%;
       touch-action: manipulation; -webkit-tap-highlight-color: transparent;
     }
     .fig.fig-me { min-width: 44px; min-height: 44px; justify-content: center; }
@@ -864,7 +972,7 @@ function buildMapHtml(
       padding: 10px 14px;
       min-width: 160px;
       max-width: 210px;
-      z-index: 200;
+      z-index: 10000;
       display: none;
       pointer-events: auto;
     }
@@ -884,6 +992,9 @@ function buildMapHtml(
     .fig-popup-name { color: #efff3a; font-size: 14px; font-weight: 900; display: block; margin-bottom: 3px; }
     .fig-popup-sub  { color: #00f0ff; font-size: 11px; font-weight: 700; display: block; }
     .fig-popup-link { color: #ff2bd6; font-size: 12px; font-weight: 800; cursor: pointer; display: block; margin-top: 7px; text-decoration: none; }
+    .friend-marker-wrap.popup-open {
+      z-index: 10000 !important;
+    }
     /* ── Phase 3: Burst rings ───────────────────────────────────── */
     @keyframes burst-ring {
       0%   { transform: scale(1); opacity: 0.9; }
@@ -969,6 +1080,9 @@ function buildMapHtml(
 	      pointer-events: auto;
 		      will-change: transform;
 	    }
+    .map-symbol {
+      will-change: transform;
+    }
 	    .friend-name-tag {
 	      padding: 2px 8px;
       border-radius: var(--marker-radius);
@@ -984,12 +1098,20 @@ function buildMapHtml(
       overflow: hidden;
       text-overflow: ellipsis;
       text-align: center;
+      cursor: pointer;
+      pointer-events: auto;
+      touch-action: manipulation;
+      will-change: transform;
     }
     .friend-marker-wrap {
       display: flex;
       flex-direction: column;
       align-items: center;
       transform-origin: 50% 100%;
+      pointer-events: none;
+    }
+    .friend-marker-wrap .fig {
+      pointer-events: auto;
     }
     .info-sheet {
       min-width: 200px;
@@ -1101,6 +1223,7 @@ function buildMapHtml(
     var markerRefs = [];
     var poiMarkerEntries = [];
     var poiVisibilityRaf = null;
+    var radarSizing = { lat: ${lat}, lng: ${lng}, radiusM: 500, enabled: true };
     window._mapUsersById = {};
 
 	    var map = new maplibregl.Map({
@@ -1160,6 +1283,10 @@ function buildMapHtml(
       });
       markerRefs = [];
       poiMarkerEntries = [];
+      if (window._myFigureMarker) {
+        try { window._myFigureMarker.marker.remove(); } catch (_) {}
+        window._myFigureMarker = null;
+      }
       if (poiVisibilityRaf) {
         window.cancelAnimationFrame(poiVisibilityRaf);
         poiVisibilityRaf = null;
@@ -1203,27 +1330,66 @@ function buildMapHtml(
     }
 
     function poiOffsetForSlot(index, clusterSize, strength) {
-      if (clusterSize <= 1 || strength <= 0.01) return { dx: 0, dy: 0 };
-      var columns = Math.min(5, clusterSize);
-      var col = index % columns;
-      var row = Math.floor(index / columns);
-      var gapX = 48;
-      var gapY = 50;
-      var centeredCol = col - ((columns - 1) / 2);
-      return {
-        dx: centeredCol * gapX * strength,
-        dy: (-58 - row * gapY) * strength
-      };
+      return { dx: 0, dy: 0 };
+    }
+
+    function distanceMetersBetween(lat1, lng1, lat2, lng2) {
+      var toRad = Math.PI / 180;
+      var dLat = (lat2 - lat1) * toRad;
+      var dLng = (lng2 - lng1) * toRad;
+      var a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function proximityScaleFor(lat, lng) {
+      var radius = Number(radarSizing && radarSizing.radiusM) || 500;
+      if (!radarSizing || !radarSizing.enabled || typeof lat !== 'number' || typeof lng !== 'number') return 1;
+      var distance = distanceMetersBetween(radarSizing.lat, radarSizing.lng, lat, lng);
+      if (distance <= radius) return 1.34;
+      if (distance <= radius * 2) return 1;
+      return 0.72;
+    }
+
+    function applyMarkerSize(element, baseSize, scale) {
+      if (!element) return;
+      var visualSize = Math.max(8, Math.round(baseSize * scale));
+      element.__baseVisualSize = baseSize;
+      element.__proximityScale = scale;
+      element.style.width = visualSize + 'px';
+      element.style.height = visualSize + 'px';
+      element.style.borderRadius = visualSize <= 16 ? 'var(--small-marker-radius)' : 'var(--marker-radius)';
+      element.style.fontSize = Math.max(11, Math.round(visualSize * 0.55)) + 'px';
+      element.style.lineHeight = '1';
+      return visualSize;
+    }
+
+    function applyFigureScale(figure, lat, lng) {
+      if (!figure) return;
+      figure.style.setProperty('--symbol-scale', String(proximityScaleFor(lat, lng).toFixed(2)));
+    }
+
+    function setCollisionTransform(element, baseX, baseY, collisionX, collisionY) {
+      if (!element) return;
+      element.__baseCollisionX = baseX || 0;
+      element.__baseCollisionY = baseY || 0;
+      element.__collisionX = 0;
+      element.__collisionY = 0;
+      var x = element.__baseCollisionX;
+      var y = element.__baseCollisionY;
+      element.style.transform = 'translate3d(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px,0)';
     }
 
     function applyPoiOffset(entry, dx, dy, zoom) {
       var badge = entry.badge || entry.element.__poiBadge;
       var connector = entry.connector || entry.element.__poiConnector;
       var originDot = entry.originDot || entry.element.__poiOriginDot;
-      var size = entry.size || entry.element.__poiSize || 28;
+      var size = entry.badge.__poiSize || entry.size || entry.element.__poiSize || 28;
       if (!badge || !connector) return;
 
-      badge.style.transform = 'translate(' + (dx - size / 2) + 'px,' + (dy - size / 2) + 'px)';
+      setCollisionTransform(badge, dx - size / 2, dy - size / 2, badge.__collisionX || 0, badge.__collisionY || 0);
       badge.style.opacity = zoom < 15.4 ? '0.94' : '1';
 
       var distance = Math.hypot(dx, dy);
@@ -1792,6 +1958,7 @@ function buildMapHtml(
 
     function markerEl(size, background, border, shadow, innerHtml) {
       var el = document.createElement('div');
+      el.__collisionPriority = size >= 28 ? 60 : 40;
       el.style.cssText = [
         'width:' + size + 'px',
         'height:' + size + 'px',
@@ -1815,7 +1982,8 @@ function buildMapHtml(
       var originDot = document.createElement('div');
       originDot.className = 'poi-origin-dot';
       var badge = document.createElement('div');
-      badge.className = 'poi-badge';
+      badge.className = 'poi-badge map-symbol';
+      badge.__collisionPriority = 42;
       badge.style.cssText = [
         'width:' + size + 'px',
         'height:' + size + 'px',
@@ -1990,6 +2158,7 @@ function buildMapHtml(
         var base = styles[poi.category] || styles.shop;
         var category = resolvePoiVisual(poi, base);
         var stableKey = String(poi.category + '|' + poi.name + '|' + poi.id);
+        var poiScale = proximityScaleFor(poi.lat, poi.lng);
         var poiEl = poiMarkerEl(
           28,
           'linear-gradient(135deg, rgba(0,0,0,0.96) 0%, rgba(6,10,16,0.98) 100%)',
@@ -1998,6 +2167,10 @@ function buildMapHtml(
           '<span style="font-size:15px; line-height:1;">' + category.icon + '</span>'
         );
         poiEl.style.cursor = 'pointer';
+        poiEl.__poiBadge.__collisionPriority = poiCategoryPriority(poi, category);
+        var poiSize = applyMarkerSize(poiEl.__poiBadge, 28, poiScale);
+        poiEl.__poiSize = poiSize;
+        poiEl.__poiBadge.__poiSize = poiSize;
 
         var poiMarker = pushMarker(new maplibregl.Marker({ element: poiEl, anchor: 'center', pitchAlignment: 'viewport', rotationAlignment: 'viewport' })
           .setLngLat([poi.lng, poi.lat])
@@ -2053,7 +2226,9 @@ function buildMapHtml(
         );
         partyEl.style.cursor = 'pointer';
         partyEl.style.zIndex = '95';
-        partyEl.className = 'party-pulse';
+        partyEl.__collisionPriority = 82;
+        partyEl.classList.add('party-pulse');
+        applyMarkerSize(partyEl, 32, proximityScaleFor(party.lat, party.lng));
 
         function handlePartyClick(event) {
           if (event) {
@@ -2101,7 +2276,7 @@ function buildMapHtml(
 
         partyEl.addEventListener('click', handlePartyClick);
 
-        pushMarker(new maplibregl.Marker({ element: partyEl, anchor: 'center' })
+        var partyMarker = pushMarker(new maplibregl.Marker({ element: partyEl, anchor: 'center' })
           .setLngLat([party.lng, party.lat])
           .setPopup(new maplibregl.Popup({ closeButton: false, offset: 14 }).setHTML(
             infoSheetHtml(
@@ -2119,8 +2294,10 @@ function buildMapHtml(
             '1px solid var(--ink)',
             '0 0 10px rgba(0,255,178,0.45)'
           );
+          mEl.__collisionPriority = 38;
+          applyMarkerSize(mEl, 13, proximityScaleFor(m.lat, m.lng));
           mEl.style.display = 'none';
-          pushMarker(new maplibregl.Marker({ element: mEl, anchor: 'center' })
+          var memberMarker = pushMarker(new maplibregl.Marker({ element: mEl, anchor: 'center' })
             .setLngLat([m.lng, m.lat])
             .setPopup(new maplibregl.Popup({ closeButton: false, offset: 8 }).setHTML(
               infoSheetHtml(m.name, 'Party-Mitglied', '🧑', m.id)
@@ -2131,6 +2308,32 @@ function buildMapHtml(
       });
 
       updatePartyMemberVisibility();
+    }
+
+    var friendLabelLayoutRaf = null;
+
+    function scheduleFriendLabelLayout() {
+      if (friendLabelLayoutRaf) window.cancelAnimationFrame(friendLabelLayoutRaf);
+      friendLabelLayoutRaf = window.requestAnimationFrame(function() {
+        friendLabelLayoutRaf = null;
+        resetFriendLabels();
+        resetMapSymbols();
+      });
+    }
+
+    function resetFriendLabels() {
+      document.querySelectorAll('.friend-name-tag').forEach(function(label) {
+        label.style.transform = 'translate3d(0,0,0)';
+      });
+    }
+
+    function resetMapSymbols() {
+      document.querySelectorAll('.map-symbol').forEach(function(symbol) {
+        setCollisionTransform(symbol, symbol.__baseCollisionX || 0, symbol.__baseCollisionY || 0, 0, 0);
+      });
+      markerRefs.forEach(function(marker) {
+        try { marker.setOffset([0, 0]); } catch (_) {}
+      });
     }
 
     function addUserMarkers() {
@@ -2164,14 +2367,19 @@ function buildMapHtml(
           if (existing) {
             existing.marker.setLngLat([u.lng, u.lat]);
             setFigureState(existing.fig, motion.speed, motion.heading);
+            applyFigureScale(existing.fig, u.lat, u.lng);
             return;
           }
           var fr = figureEl(false);
+          fr.wrap.classList.add('friend-marker-wrap');
+          fr.wrap.setAttribute('role', 'button');
+          fr.wrap.setAttribute('aria-label', (u.name || 'Freund') + ' öffnen');
           var lbl = document.createElement('div');
           lbl.className = 'friend-name-tag';
           lbl.textContent = u.name || 'Freund';
           fr.wrap.insertBefore(lbl, fr.wrap.firstChild);
           setFigureState(fr.fig, motion.speed, motion.heading);
+          applyFigureScale(fr.fig, u.lat, u.lng);
           fr.wrap.style.zIndex = '2';
           fr.wrap.style.animationDelay = (uIdx * 0.048) + 's';
           fr.wrap.classList.add('fig-entering');
@@ -2203,14 +2411,33 @@ function buildMapHtml(
           }
           fr.wrap.appendChild(inlinePopup);
           inlinePopup.addEventListener('click', function(e) { e.stopPropagation(); });
-          fr.wrap.addEventListener('click', function(e) {
-            if (e.target === fr.wrap) return;
+          var activateFriendMarker = function(e) {
+            if (e.target && e.target.closest && e.target.closest('.fig-popup-link')) return;
+            if (e.cancelable) e.preventDefault();
             e.stopPropagation();
+            var now = Date.now();
+            if (fr.wrap.__lastActivate && now - fr.wrap.__lastActivate < 320) return;
+            fr.wrap.__lastActivate = now;
             var isVisible = inlinePopup.classList.contains('visible');
-            document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p) { p.classList.remove('visible'); });
-            if (!isVisible) { inlinePopup.classList.add('visible'); }
+            document.querySelectorAll('.friend-marker-wrap.popup-open').forEach(function(w) {
+              w.classList.remove('popup-open');
+              w.style.zIndex = '2';
+            });
+            document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p) {
+              p.classList.remove('visible');
+            });
+            if (!isVisible) {
+              fr.wrap.classList.add('popup-open');
+              fr.wrap.style.zIndex = '10000';
+              inlinePopup.classList.add('visible');
+            }
+          };
+          [lbl, fr.fig].forEach(function(target) {
+            target.addEventListener('touchend', activateFriendMarker, { passive: false });
+            target.addEventListener('click', activateFriendMarker);
           });
           window._figureMarkers[u.id] = { marker: fMarker, fig: fr.fig, wrap: fr.wrap };
+          scheduleFriendLabelLayout();
           return;
         }
 
@@ -2225,20 +2452,24 @@ function buildMapHtml(
             '0 0 14px ' + heartBackground,
             '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + heartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
           );
-          el.className = 'pulse';
+          el.__collisionPriority = 72;
+          el.classList.add('pulse');
+          applyMarkerSize(el, 28, proximityScaleFor(u.lat, u.lng));
         } else {
           var circleSize = isFriend ? 22 : 13;
           var circleColor = isFriend ? neonYellow : neonGreen;
           var circleGlow = isFriend ? 'rgba(239,255,58,0.44)' : 'rgba(0,255,178,0.38)';
           el = markerEl(circleSize, circleColor, '1px solid rgba(234,251,255,0.9)', '0 0 10px ' + circleGlow);
-          if (isFriend) el.className = 'friend-pulse';
+          el.__collisionPriority = isFriend ? 68 : 46;
+          if (isFriend) el.classList.add('friend-pulse');
+          applyMarkerSize(el, circleSize, proximityScaleFor(u.lat, u.lng));
         }
 
         var subtitle = showDatingMarker
           ? (u.intent === 'relationship' ? 'Sucht eine Beziehung' : 'Sucht Freunde')
           : currentFilter === 'friends' ? 'Freund' : 'Gerade aktiv ↗';
 
-        pushMarker(new maplibregl.Marker({ element: el, anchor: 'center' })
+        var userMarker = pushMarker(new maplibregl.Marker({ element: el, anchor: 'center' })
           .setLngLat([u.lng, u.lat])
           .setPopup(new maplibregl.Popup({ closeButton: false, offset: 10 }).setHTML(
             infoSheetHtml(u.name || 'Local', subtitle, '🧑', u.id, avatarSrc)
@@ -2253,12 +2484,14 @@ function buildMapHtml(
           delete window._figureMarkers[id];
         }
       });
+      scheduleFriendLabelLayout();
     }
 
     function addMyMarker() {
       var myPresence = window._mapPresence || 'online';
-      var myLat = (window._myCurrentPos && window._myCurrentPos.lat) || ${lat};
-      var myLng = (window._myCurrentPos && window._myCurrentPos.lng) || ${lng};
+      var ownPos = window._ownMarkerPos || { lat: ${lat}, lng: ${lng} };
+      var myLat = ownPos.lat;
+      var myLng = ownPos.lng;
 
       if (myPresence === 'friend' || myPresence === 'relationship') {
         if (window._myFigureMarker) {
@@ -2276,14 +2509,17 @@ function buildMapHtml(
           '<svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + meHeartColor + '" d="M12 21s-7.2-4.6-9.6-9.2C.7 8.5 2.6 4.5 6.3 4.2c2-.2 3.5.8 4.4 2.1.3.4.9.4 1.2 0 1-1.4 2.5-2.3 4.4-2.1 3.7.3 5.6 4.3 3.9 7.6C19.2 16.4 12 21 12 21z"/></svg>'
         );
         meEl.style.zIndex = '90';
-        pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
+        meEl.__collisionPriority = 90;
+        applyMarkerSize(meEl, 42, 1);
+        var ownMarker = pushMarker(new maplibregl.Marker({ element: meEl, anchor: 'center' })
           .setLngLat([myLng, myLat])
           .setPopup(new maplibregl.Popup({ closeButton: false, offset: 11 }).setHTML(infoSheetHtml('Du', mePopupText, '📍')))
           .addTo(map));
       } else {
         if (!window._myFigureMarker) {
           var meFr = figureEl(true);
-          meFr.wrap.style.zIndex = '90';
+          meFr.fig.style.setProperty('--symbol-scale', '1');
+          meFr.wrap.style.zIndex = '1000';
           meFr.wrap.style.pointerEvents = 'none';
           meFr.fig.style.pointerEvents = 'auto';
           meFr.wrap.classList.add('fig-entering');
@@ -2305,6 +2541,7 @@ function buildMapHtml(
           window._myFigureMarker = { marker: meMarker, fig: meFr.fig, wrap: meFr.wrap };
         } else {
           window._myFigureMarker.marker.setLngLat([myLng, myLat]);
+          window._myFigureMarker.fig.style.setProperty('--symbol-scale', '1');
         }
       }
     }
@@ -2320,6 +2557,7 @@ function buildMapHtml(
       addPartyAndMemberMarkers();
       addUserMarkers();
       addMyMarker();
+      scheduleFriendLabelLayout();
     }
 
     map.on('style.load', function() {
@@ -2330,6 +2568,7 @@ function buildMapHtml(
     map.on('zoomend', schedulePoiMarkerVisibilityUpdate);
     map.on('pitchend', schedulePoiMarkerVisibilityUpdate);
     map.on('resize', schedulePoiMarkerVisibilityUpdate);
+    map.on('resize', scheduleFriendLabelLayout);
 
     map.on('error', function(errorEvent) {
       var msg = errorEvent && errorEvent.error && errorEvent.error.message
@@ -2346,15 +2585,27 @@ function buildMapHtml(
     window._mapMotion = {};
     window._figureMarkers = {};
     window._myFigureMarker = null;
-    window._myCurrentPos = null;
+    window._myCurrentPos = { lat: ${lat}, lng: ${lng} };
+    window._ownMarkerPos = { lat: ${lat}, lng: ${lng} };
 
-    window.updateMapData = function(users, pois, parties, filter, presence, motionData) {
+    window.updateMapData = function(users, pois, parties, filter, presence, motionData, sizingData, ownPosition) {
       window._mapUsers = users || [];
       window._mapPois = pois || [];
       window._mapParties = parties || [];
       window._mapFilter = filter || 'all';
       window._mapPresence = presence || 'online';
       window._mapMotion = motionData || {};
+      if (ownPosition && typeof ownPosition.lat === 'number' && typeof ownPosition.lng === 'number') {
+        window._ownMarkerPos = { lat: ownPosition.lat, lng: ownPosition.lng };
+      }
+      if (sizingData && typeof sizingData.lat === 'number' && typeof sizingData.lng === 'number') {
+        radarSizing = {
+          lat: sizingData.lat,
+          lng: sizingData.lng,
+          radiusM: Number(sizingData.radiusM) || 500,
+          enabled: sizingData.enabled !== false,
+        };
+      }
       if (window.map && window.map.isStyleLoaded()) {
         renderMapLayersAndMarkers();
         schedulePoiMarkerVisibilityUpdate();
@@ -2362,9 +2613,10 @@ function buildMapHtml(
     };
 
     window.updateMyFigure = function(speed, heading, lat, lng) {
-      window._myCurrentPos = { lat: lat, lng: lng };
+      window._myCurrentPos = { lat: ${lat}, lng: ${lng} };
       if (window._myFigureMarker) {
-        window._myFigureMarker.marker.setLngLat([lng, lat]);
+        var ownPos = window._ownMarkerPos || { lat: ${lat}, lng: ${lng} };
+        window._myFigureMarker.marker.setLngLat([ownPos.lng, ownPos.lat]);
         setFigureState(window._myFigureMarker.fig, speed, heading);
       }
     };
@@ -2435,6 +2687,7 @@ export default function MapScreen() {
   const mySpeedRef = useRef<number>(0);
   const myHeadingRef = useRef<number | null>(null);
   const prevRadarIdsRef = useRef<Set<string>>(new Set());
+  const simulationAgents = useMemo(() => buildSimulatedMapAgents(), []);
 
   const injectRadar = useCallback(() => {
     if (!webViewRef.current) return;
@@ -2855,7 +3108,6 @@ out center tags ${LIVE_POI_LIMIT};`;
     return () => clearInterval(interval);
   }, [injectTimeOfDay, isMapActive]);
 
-
   // Combine mock seed parties + user-created parties
   const allParties = useMemo(() => {
     if (!homeLocation) return [];
@@ -2889,39 +3141,25 @@ out center tags ${LIVE_POI_LIMIT};`;
     return [...mockParties, ...userParties];
   }, [homeLocation, allUsers, storedParties]);
 
-	  const simulatedUsers = useMemo<MapUser[]>(() => {
-	    if (!__DEV__ || !homeLocation) return [];
-	    const total = DEV_SIMULATED_STRANGER_COUNT + DEV_SIMULATED_FRIEND_COUNT;
-	    return Array.from({ length: total }, (_, index) => {
-	      const isFriend = index < DEV_SIMULATED_FRIEND_COUNT;
-	      const localIndex = isFriend ? index : index - DEV_SIMULATED_FRIEND_COUNT;
-	      const ring = Math.floor(localIndex / 10);
-	      const angle =
-	        (localIndex / (isFriend ? DEV_SIMULATED_FRIEND_COUNT : DEV_SIMULATED_STRANGER_COUNT)) *
-	          Math.PI *
-	          2 +
-	        ring * 0.57 +
-	        (isFriend ? 0.22 : 0);
-	      const radius = isFriend
-	        ? 0.0032 + (index % 4) * 0.0011
-	        : 0.0038 + ring * 0.00105 + (localIndex % 6) * 0.00042;
-	      return {
-        id: isFriend ? `sim-friend-${index + 1}` : `sim-local-${index - DEV_SIMULATED_FRIEND_COUNT + 1}`,
-        name: isFriend ? `Freund ${index + 1}` : `Local ${index - DEV_SIMULATED_FRIEND_COUNT + 1}`,
-        lat: homeLocation.lat + Math.sin(angle) * radius,
-        lng: homeLocation.lng + Math.cos(angle) * radius,
-        intent: "active",
-        isFriend,
-      };
-    });
+  const simulationOrigin = useMemo(() => {
+    if (!homeLocation) return null;
+    return {
+      lat: homeLocation.lat,
+      lng: homeLocation.lng,
+    };
   }, [homeLocation]);
+
+  const simulatedSnapshot = useMemo(
+    () => getSimulatedMapSnapshot(simulationAgents, simulationOrigin),
+    [simulationAgents, simulationOrigin],
+  );
 
   const mapUsers = useMemo(
     () => [
       ...activeUsers.map((user) => ({ ...user, isFriend: friendIds.has(user.id) })),
-      ...simulatedUsers,
+      ...simulatedSnapshot.users,
     ],
-    [activeUsers, friendIds, simulatedUsers],
+    [activeUsers, friendIds, simulatedSnapshot.users],
   );
 
   const visibleUsers = useMemo(() => {
@@ -3022,9 +3260,18 @@ out center tags ${LIVE_POI_LIMIT};`;
 
   const injectMapData = useCallback(() => {
     if (!webViewRef.current) return;
-    const script = `(function(){if(window.updateMapData)window.updateMapData(${JSON.stringify(visibleUsers)},${JSON.stringify(livePois)},${JSON.stringify(allParties)},${JSON.stringify(filterMode)},${JSON.stringify(presenceMode)});})();true;`;
+    const radarOriginLat = myLiveLocation?.lat ?? homeLocation?.lat;
+    const radarOriginLng = myLiveLocation?.lon ?? homeLocation?.lng;
+    const ownPosition = homeLocation ? { lat: homeLocation.lat, lng: homeLocation.lng } : null;
+    const sizingData = {
+      lat: radarOriginLat,
+      lng: radarOriginLng,
+      radiusM: radarSettings.radiusM,
+      enabled: radarSettings.enabled && radarOriginLat != null && radarOriginLng != null,
+    };
+    const script = `(function(){if(window.updateMapData)window.updateMapData(${JSON.stringify(visibleUsers)},${JSON.stringify(livePois)},${JSON.stringify(allParties)},${JSON.stringify(filterMode)},${JSON.stringify(presenceMode)},${JSON.stringify(simulatedSnapshot.motion)},${JSON.stringify(sizingData)},${JSON.stringify(ownPosition)});})();true;`;
     webViewRef.current.injectJavaScript(script);
-  }, [visibleUsers, livePois, allParties, filterMode, presenceMode]);
+  }, [visibleUsers, livePois, allParties, filterMode, presenceMode, simulatedSnapshot.motion, myLiveLocation, homeLocation, radarSettings.enabled, radarSettings.radiusM]);
 
   useEffect(() => {
     injectMapDataRef.current = injectMapData;
@@ -3097,6 +3344,15 @@ out center tags ${LIVE_POI_LIMIT};`;
         members,
       };
       const updatedParties = [...allParties, newPartyForMap];
+      const radarOriginLat = myLiveLocation?.lat ?? homeLocation.lat;
+      const radarOriginLng = myLiveLocation?.lon ?? homeLocation.lng;
+      const sizingData = {
+        lat: radarOriginLat,
+        lng: radarOriginLng,
+        radiusM: radarSettings.radiusM,
+        enabled: radarSettings.enabled,
+      };
+      const ownPosition = { lat: homeLocation.lat, lng: homeLocation.lng };
       webViewRef.current.injectJavaScript(
         `(function(){
           if(window.updateMapData) window.updateMapData(
@@ -3104,7 +3360,10 @@ out center tags ${LIVE_POI_LIMIT};`;
             ${JSON.stringify(livePois)},
             ${JSON.stringify(updatedParties)},
             ${JSON.stringify(filterMode)},
-            ${JSON.stringify(presenceMode)}
+            ${JSON.stringify(presenceMode)},
+            ${JSON.stringify(simulatedSnapshot.motion)},
+            ${JSON.stringify(sizingData)},
+            ${JSON.stringify(ownPosition)}
           );
           if(window.map) window.map.easeTo({ center: [${partyLng}, ${partyLat}], zoom: 15, duration: 700 });
           if(window.triggerPartySpawn) window.triggerPartySpawn(${partyLat}, ${partyLng});
@@ -3118,7 +3377,7 @@ out center tags ${LIVE_POI_LIMIT};`;
     setCreateComposerMode(null);
     setShowPartyComposer(false);
   }, [effectivePresenceMode, homeLocation, partyName, partyAddress, selectedPartyMembers, createParty,
-      currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode]);
+      currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode, simulatedSnapshot.motion, myLiveLocation, radarSettings.enabled, radarSettings.radiusM]);
 
   const handleCreateGroup = useCallback(() => {
     if (effectivePresenceMode === "home") {
@@ -3464,6 +3723,7 @@ out center tags ${LIVE_POI_LIMIT};`;
 
       {/* Map */}
       <WebView
+        key={`map-${homeLocation.lat.toFixed(6)}-${homeLocation.lng.toFixed(6)}`}
         ref={webViewRef}
         style={styles.map}
         source={{ html }}
