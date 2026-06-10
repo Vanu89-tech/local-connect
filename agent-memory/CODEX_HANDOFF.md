@@ -25,6 +25,37 @@ Swipe-to-Reply im Messenger ist überarbeitet und gebaut. Nächste sinnvolle Sch
 - Chat-Migration in Supabase ausführen: `supabase/migrations/20260528090000_chat_reliability_security.sql`
 - Weitere Messenger-Features nach Bedarf
 
+## Zuletzt erledigt (2026-06-10) — Session 8
+
+### Sim-Tab: LOD-System komplett neu gebaut (simulation-lab.tsx)
+
+- **4 Bugs gefixt:** Hard-Boundary bei Radius-Ende, maxVisible-Hard-Cut, minLod-vs-lodForDistance-Konflikt, keine Hysterese
+- `lodForDistance()` → `lodScore()`: gibt kontinuierlichen Float 0.0–1.0 via Smoothstep zurück (kein Stufensprung mehr)
+- `applyLodClass()` → `applyLodValue()`: setzt `--lod-scale` + `opacity` als inline CSS-Properties (kein Klassen-Flip mehr)
+- `updateLodForAll()`: Sort+Slice → Budget-Pass (150/350/800 Budget je Qualitätsstufe) mit 10% Hysterese-Puffer
+- Quality-Profile: `maxVisible`/`guaranteedPeopleRadiusM` entfernt → `budget`, `typeRadius`, `typeCost` pro Entitätstyp
+- `typeRadius`: Locals bei WEAK nur 40% des Radius sichtbar, Transit immer 100%, Friends bei WEAK 70%
+- Hysterese-Schwellen: Show > 0.06, Hide < 0.02 — verhindert Flackern an der Radiusgrenze
+- CSS: 5 `.sim-lod-*`-Klassen → 1 `.sim-culled`-Klasse
+
+### Simulation Skill: Schnell-Rebundle-Workflow etabliert
+- JS-Änderungen brauchen keinen vollen Xcode-Build mehr
+- `expo export:embed --dev false --minify false` + `hermesc -emit-binary` → Bundle kopieren → ~15s statt Minuten
+- Skill aktualisiert mit korrekten Flags (ohne `-O`, mit `--reset-cache`)
+
+### Simulation Skill: Gemeinsamer Simulator für Claude + Codex
+- Skill prüft nun zuerst ob bereits ein Simulator läuft (z.B. von Codex) → verwendet diesen
+- Verhindert dass Claude und Codex in verschiedenen Simulatoren arbeiten
+
+### Bus/Tram-Symbole (simulation-lab.tsx)
+- `transitEl()` und `transitScreenEl()`: Badge-Labels (`B21`, `T1`) → Emoji-Symbole `🚌`/`🚊`
+- Marker verkleinert (44px Wrap, 24px Core statt 54px/30px)
+- CSS: Transit-Marker-Klassen auf Emoji-basiertes Rendering umgestellt
+
+### Betroffene Dateien
+- `artifacts/mobile/app/(tabs)/simulation-lab.tsx`
+- `.claude/skills/simulation/skill.md`
+
 ## Zuletzt erledigt (2026-06-01) — Session 7
 
 ### Swipe-to-Reply Mechanik überarbeitet (index.tsx)

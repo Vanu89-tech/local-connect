@@ -80,11 +80,7 @@ function buildSimHtml(lat: number, lng: number): string {
   .maplibregl-canvas { filter:saturate(1.25) contrast(1.06) brightness(0.9); }
   .pulse { animation:pulse 2s infinite; }
   @keyframes pulse { 0%{opacity:1} 50%{opacity:0.68} 100%{opacity:1} }
-  .sim-lod-0 { --lod-scale:0.1; opacity:0 !important; pointer-events:none !important; }
-  .sim-lod-1 { --lod-scale:0.64; opacity:0.72; }
-  .sim-lod-2 { --lod-scale:0.82; opacity:0.86; }
-  .sim-lod-3 { --lod-scale:1; opacity:1; }
-  .sim-lod-4 { --lod-scale:1.16; opacity:1; }
+  .sim-culled { opacity:0 !important; pointer-events:none !important; }
   body.quality-weak .friend-name-tag,
   body.quality-weak .entity-label { display:none !important; }
   body.quality-weak .sim-float-icon { animation:none !important; }
@@ -201,46 +197,34 @@ function buildSimHtml(lat: number, lng: number): string {
   .friend-marker-wrap .fig { pointer-events:auto; }
   /* ── Game world entities ───────────────────────────────────────── */
   .transit-wrap {
-    position:relative; width:54px; height:54px; display:flex; align-items:center; justify-content:center;
+    position:relative; width:28px; height:28px; display:flex; align-items:center; justify-content:center;
     transform-origin:50% 50%; pointer-events:auto; touch-action:manipulation;
   }
   .transit-core {
-    min-width:42px; height:30px; padding:0 7px; border-radius:8px;
-    border:2px solid rgba(255,255,255,0.98);
-    display:flex; align-items:center; justify-content:center;
-    color:#02070d; font-size:13px; font-weight:1000;
-    box-shadow:0 0 16px rgba(255,43,214,0.76),0 0 30px rgba(0,240,255,0.26);
-    transform:rotate(var(--heading,0deg)) scale(var(--lod-scale,1));
+    font-size:20px; line-height:1;
+    transform:scale(var(--lod-scale,1));
     transform-origin:50% 50%;
+    filter:drop-shadow(0 0 4px rgba(0,240,255,0.7));
   }
-  .transit-wrap.bus .transit-core { background:#ff2bd6; color:#ffffff; }
-  .transit-wrap.tram .transit-core { background:#efff3a; color:#02070d; box-shadow:0 0 18px rgba(239,255,58,0.88),0 0 30px rgba(0,240,255,0.24); }
+  .transit-wrap.bus .transit-core { filter:drop-shadow(0 0 5px rgba(255,43,214,0.9)); }
+  .transit-wrap.tram .transit-core { filter:drop-shadow(0 0 5px rgba(239,255,58,0.9)); }
   .transit-wrap::after {
     content:""; position:absolute; left:50%; top:50%; width:8px; height:2px;
     background:rgba(234,251,255,0.92); transform:translate(-50%, 16px);
     border-radius:50%;
   }
   .transit-screen {
-    position:absolute; left:0; top:0; width:54px; height:54px;
+    position:absolute; left:0; top:0; width:28px; height:28px;
     display:flex; align-items:center; justify-content:center; pointer-events:none;
     transform:translate(-9999px,-9999px); will-change:transform,opacity;
   }
   .transit-screen-core {
-    min-width:42px; height:30px; padding:0 7px; border-radius:8px;
-    border:2px solid rgba(255,255,255,0.98);
-    display:flex; align-items:center; justify-content:center;
-    font-size:13px; font-weight:1000;
-    transform:rotate(var(--heading,0deg)) scale(var(--lod-scale,1));
+    font-size:20px; line-height:1;
+    transform:scale(var(--lod-scale,1));
     transform-origin:50% 50%;
   }
-  .transit-screen.bus .transit-screen-core {
-    background:#ff2bd6; color:#fff;
-    box-shadow:0 0 16px rgba(255,43,214,0.76),0 0 30px rgba(0,240,255,0.26);
-  }
-  .transit-screen.tram .transit-screen-core {
-    background:#efff3a; color:#02070d;
-    box-shadow:0 0 18px rgba(239,255,58,0.88),0 0 30px rgba(0,240,255,0.24);
-  }
+  .transit-screen.bus .transit-screen-core { filter:drop-shadow(0 0 5px rgba(255,43,214,0.9)); }
+  .transit-screen.tram .transit-screen-core { filter:drop-shadow(0 0 5px rgba(239,255,58,0.9)); }
   .entity-marker {
     position:relative; display:flex; flex-direction:column; align-items:center; gap:4px;
     transform-origin:50% 100%; pointer-events:auto;
@@ -407,28 +391,31 @@ var QUALITY = {
   weak: {
     label: 'WEAK',
     tickMs: 50,
-    maxVisible: 90,
-    guaranteedPeopleRadiusM: 260,
+    budget: 150,
+    typeRadius: { transit: 1.0, friend: 0.7, person: 0.4, poi: 0.5 },
+    typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
     labelDistanceM: 150,
-    lodRadiusM: 650,
+    lodRadiusM: 500,
     minZoom: 14.45,
   },
   medium: {
     label: 'MID',
     tickMs: 33,
-    maxVisible: 190,
-    guaranteedPeopleRadiusM: 460,
+    budget: 350,
+    typeRadius: { transit: 1.0, friend: 0.9, person: 0.7, poi: 0.8 },
+    typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
     labelDistanceM: 320,
-    lodRadiusM: 1150,
+    lodRadiusM: 1100,
     minZoom: 13.35,
   },
   strong: {
     label: 'STRONG',
     tickMs: 16,
-    maxVisible: 520,
-    guaranteedPeopleRadiusM: 920,
+    budget: 800,
+    typeRadius: { transit: 1.0, friend: 1.0, person: 1.0, poi: 1.0 },
+    typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
     labelDistanceM: 620,
-    lodRadiusM: 2300,
+    lodRadiusM: 2200,
     minZoom: 11.75,
   },
 };
@@ -476,19 +463,35 @@ function updatePerformanceSample() {
   if (fps) fps.textContent = String(Math.round(PERF.fps));
 }
 
-function lodForDistance(distanceM, zoom) {
+var _LOD_SHOW = 0.06;
+var _LOD_HIDE = 0.02;
+
+function lodScore(distanceM, kind, zoom) {
   var profile = QUALITY[PERF.quality];
-  var normalized = distanceM / profile.lodRadiusM;
-  var zoomBonus = zoom >= 15.2 ? 1 : zoom <= 12.2 ? -1 : 0;
-  var base = normalized < 0.18 ? 4 : normalized < 0.38 ? 3 : normalized < 0.68 ? 2 : normalized <= 1 ? 1 : 0;
-  return clamp(base + zoomBonus, 0, 4);
+  var typeR = (profile.typeRadius[kind] || 1.0) * profile.lodRadiusM;
+  var n = distanceM / typeR;
+  if (n >= 1.12) return 0;
+  var t = Math.max(0, 1 - n);
+  var smooth = t * t * (3 - 2 * t); // smoothstep
+  var zBonus = zoom >= 15.2 ? 0.12 : zoom <= 12.2 ? -0.12 : 0;
+  return Math.max(0, Math.min(1, smooth + zBonus));
 }
 
-function applyLodClass(el, lod) {
-  if (!el) return;
-  el.classList.remove('sim-lod-0','sim-lod-1','sim-lod-2','sim-lod-3','sim-lod-4');
-  el.classList.add('sim-lod-' + lod);
-  el.dataset.lod = String(lod);
+function applyLodValue(el, score, wasVisible) {
+  if (!el) return false;
+  var visible = wasVisible ? score > _LOD_HIDE : score > _LOD_SHOW;
+  if (!visible) {
+    if (!el.classList.contains('sim-culled')) el.classList.add('sim-culled');
+    el.dataset.lod = '0';
+    return false;
+  }
+  el.classList.remove('sim-culled');
+  var scale = Math.min(1.12, 0.55 + score * 0.57);
+  var opacity = Math.min(1.0, 0.25 + score * 0.95);
+  el.style.setProperty('--lod-scale', scale.toFixed(3));
+  el.style.opacity = opacity.toFixed(3);
+  el.dataset.lod = '1';
+  return true;
 }
 
 function updateLodForAll() {
@@ -497,55 +500,63 @@ function updateLodForAll() {
   var zoom = map.getZoom();
   var profile = QUALITY[PERF.quality];
   updateLodRadiusOverlay();
-  var visible = 0;
-  var lodSum = 0;
-  var lodCount = 0;
+
   var candidates = [];
-  function addEntry(entry, lat, lng, minLod, priority, kind) {
+
+  function addEntry(entry, lat, lng, kind, priority) {
     var d = distM(center.lat, center.lng, lat, lng);
-    var lod = lodForDistance(d, zoom);
-    if (kind === 'person' && d <= profile.guaranteedPeopleRadiusM) {
-      lod = Math.max(lod, entry.agent && entry.agent.isFriend ? 3 : 2);
-    }
-    if (lod < minLod) lod = 0;
-    candidates.push({ entry:entry, lod:lod, distance:d, priority:priority || 0, kind:kind || 'other' });
+    var score = lodScore(d, kind, zoom);
+    var wasVisible = entry._lodVisible || false;
+    candidates.push({
+      entry: entry,
+      score: score,
+      sortVal: score * (1 + (priority || 0) * 0.004) + (wasVisible ? 0.04 : 0),
+      cost: profile.typeCost[kind] || 2,
+      wasVisible: wasVisible,
+    });
   }
+
   Object.keys(window._simMarkers).forEach(function(id) {
     var entry = window._simMarkers[id];
     if (!entry || !entry.agent) return;
-    addEntry(entry, entry.agent.lat, entry.agent.lng, entry.agent.isFriend ? 1 : 2, entry.agent.isFriend ? 78 : 34, 'person');
+    addEntry(entry, entry.agent.lat, entry.agent.lng,
+      entry.agent.isFriend ? 'friend' : 'person',
+      entry.agent.isFriend ? 78 : 34);
   });
   Object.keys(window._transitMarkers).forEach(function(id) {
     var entry = window._transitMarkers[id];
-    addEntry(entry, entry.entity.lat, entry.entity.lng, 1, entry.entity.priority || 86, 'transit');
+    addEntry(entry, entry.entity.lat, entry.entity.lng, 'transit', entry.entity.priority || 86);
   });
   Object.keys(window._worldMarkers).forEach(function(id) {
     var entry = window._worldMarkers[id];
-    addEntry(entry, entry.entity.lat, entry.entity.lng, 2, entry.entity.priority || 50, 'poi');
+    addEntry(entry, entry.entity.lat, entry.entity.lng, 'poi', entry.entity.priority || 50);
   });
 
-  candidates.sort(function(a, b) {
-    var aGuaranteed = a.kind === 'person' && a.distance <= profile.guaranteedPeopleRadiusM;
-    var bGuaranteed = b.kind === 'person' && b.distance <= profile.guaranteedPeopleRadiusM;
-    if (aGuaranteed !== bGuaranteed) return aGuaranteed ? -1 : 1;
-    if (a.distance !== b.distance) return a.distance - b.distance;
-    if (a.lod !== b.lod) return b.lod - a.lod;
-    if (a.priority !== b.priority) return b.priority - a.priority;
-    return 0;
+  candidates.sort(function(a, b) { return b.sortVal - a.sortVal; });
+
+  var budget = profile.budget;
+  var budgetHysteresis = budget * 0.1;
+  var spent = 0;
+  var visible = 0;
+
+  candidates.forEach(function(item) {
+    var show = false;
+    if (item.score <= 0) {
+      show = false;
+    } else if (spent < budget) {
+      show = item.score > _LOD_SHOW;
+    } else if (item.wasVisible && spent < budget + budgetHysteresis) {
+      show = item.score > _LOD_HIDE;
+    }
+    var el = item.entry.wrap || item.entry.el;
+    item.entry._lodVisible = applyLodValue(el, show ? item.score : 0, item.wasVisible);
+    if (item.entry._lodVisible) { spent += item.cost; visible++; }
   });
 
-  candidates.forEach(function(item, index) {
-    var lod = item.lod;
-    if (index >= profile.maxVisible) lod = 0;
-    applyLodClass(item.entry.wrap || item.entry.el, lod);
-    if (lod > 0) visible++;
-    lodSum += lod;
-    lodCount++;
-  });
   PERF.visibleEntities = visible;
   PERF.totalRenderable = candidates.length;
   var hudLod = document.getElementById('hud-lod');
-  if (hudLod) hudLod.textContent = String(Math.round(lodSum / Math.max(1, lodCount)));
+  if (hudLod) hudLod.textContent = String(visible);
 }
 
 function metersPerPixelAtCenter() {
@@ -844,30 +855,17 @@ function transitEl(entity) {
   var wrap = document.createElement('div');
   wrap.className = 'transit-wrap ' + entity.type;
   wrap.style.zIndex = '900';
-  wrap.style.width = '54px';
-  wrap.style.height = '54px';
+  wrap.style.width = '28px';
+  wrap.style.height = '28px';
   wrap.style.display = 'flex';
   wrap.style.alignItems = 'center';
   wrap.style.justifyContent = 'center';
   var core = document.createElement('div');
   core.className = 'transit-core';
-  core.style.minWidth = '42px';
-  core.style.height = '30px';
-  core.style.padding = '0 7px';
-  core.style.borderRadius = '8px';
-  core.style.border = '2px solid rgba(255,255,255,0.98)';
-  core.style.display = 'flex';
-  core.style.alignItems = 'center';
-  core.style.justifyContent = 'center';
-  core.style.fontSize = '13px';
-  core.style.fontWeight = '1000';
-  core.style.color = entity.type === 'tram' ? '#02070d' : '#ffffff';
-  core.style.background = entity.type === 'tram' ? '#efff3a' : '#ff2bd6';
-  core.style.boxShadow = entity.type === 'tram'
-    ? '0 0 18px rgba(239,255,58,0.88),0 0 30px rgba(0,240,255,0.24)'
-    : '0 0 16px rgba(255,43,214,0.76),0 0 30px rgba(0,240,255,0.26)';
+  core.style.fontSize = entity.type === 'tram' ? '20px' : '18px';
+  core.style.lineHeight = '1';
   core.style.transformOrigin = '50% 50%';
-  core.textContent = (entity.type === 'tram' ? 'T' : 'B') + entity.label;
+  core.textContent = entity.type === 'tram' ? '🚊' : '🚌';
   wrap.appendChild(core);
   return wrap;
 }
@@ -877,7 +875,7 @@ function transitScreenEl(entity) {
   wrap.className = 'transit-screen ' + entity.type;
   var core = document.createElement('div');
   core.className = 'transit-screen-core';
-  core.textContent = (entity.type === 'tram' ? 'T' : 'B') + entity.label;
+  core.textContent = entity.type === 'tram' ? '🚊' : '🚌';
   wrap.appendChild(core);
   return { wrap: wrap, core: core };
 }
@@ -891,7 +889,7 @@ function updateTransitScreenPositions() {
     var visible = entry.screen.dataset.lod !== '0';
     entry.screen.style.opacity = visible ? '1' : '0';
     entry.screen.style.transform = visible
-      ? 'translate(' + (point.x - 27).toFixed(1) + 'px,' + (point.y - 27).toFixed(1) + 'px)'
+      ? 'translate(' + (point.x - 14).toFixed(1) + 'px,' + (point.y - 14).toFixed(1) + 'px)'
       : 'translate(-9999px,-9999px)';
     if (entry.core) entry.core.style.setProperty('--heading', entry.entity.heading.toFixed(1) + 'deg');
   });
