@@ -113,15 +113,17 @@ pnpm exec expo start --dev-client --host localhost
 <!-- APP_SYNC_STATUS_START -->
 ## Letzter Sync
 
-- Timestamp UTC: 20260601T014841Z
+- Timestamp UTC: 20260610T095838Z
 - Projekt: Local-Connect
 - Branch: master
-- Commit vor Sync: 39d3cfa
-- Lokale Änderungen vor Memory-Update: 1
-- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260601T014841Z
+- Commit vor Sync: 3d1e3c8
+- Lokale Änderungen vor Memory-Update: 3
+- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260610T095838Z
 - Hinweis: Dieser Block wird automatisch von /sync aktualisiert.
 
 ### Geänderte Dateien vor Sync
 
-- ` M artifacts/mobile/app/(tabs)/map.tsx`
+- ` M artifacts/mobile/app/(tabs)/simulation-lab.tsx`
+- ` M artifacts/mobile/app/_layout.tsx`
+- `?? artifacts/mobile/features/`
 <!-- APP_SYNC_STATUS_END -->

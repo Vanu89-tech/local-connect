@@ -48,6 +48,7 @@ function RootLayoutNav() {
         const onOnboarding = rootSegment === "onboarding";
         const onLocationSetup = rootSegment === "location-setup";
         const onPresenceChoice = rootSegment === "presence-choice";
+        const onSimulationLab = __DEV__ && segmentKey.includes("simulation-lab");
 
         const seen = await AsyncStorage.getItem("locals_onboarding_seen");
         if (cancelled) return;
@@ -88,7 +89,7 @@ function RootLayoutNav() {
           if (!hasLocation) return;
         }
 
-        if (locData && !hasSelectedStartMode && !onPresenceChoice) {
+        if (locData && !hasSelectedStartMode && !onPresenceChoice && !onSimulationLab) {
           replaceIfCurrent("/presence-choice");
           return;
         }
