@@ -10,14 +10,15 @@ Der User möchte iterativ im Simulator testen und Features direkt weiterentwicke
 
 ## Simulator
 
-- **DER einzige Simulator fuer Locals: iPhone 17 (iOS 26.5), UDID: `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`**
-- Es gibt mehrere iPhone-17-Simulatoren auf dem System — NUR dieser hat die App installiert. Immer diesen nehmen.
+- **DER einzige Simulator fuer Locals ab jetzt: iPhone 17 (iOS 27.0), UDID: `AE5622ED-D44C-4B6C-B472-B234A8DABA21`**
+- Es gibt mehrere iPhone-17-Simulatoren auf dem System — ab jetzt NUR diesen iOS-27-Simulator nehmen.
 - App Bundle ID: `com.localconnect.app`
-- Simulator booten (falls Shutdown): `xcrun simctl boot "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" && open -a Simulator`
-- App starten: `xcrun simctl launch "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" "com.localconnect.app"`
-- Screenshot: `xcrun simctl io "1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF" screenshot /tmp/s.png`
-- Fuer native Aenderungen neu bauen: `pnpm exec expo run:ios --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`
-- Fuer Release-Build (kein Metro noetig): `pnpm exec expo run:ios --configuration Release --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`
+- Simulator booten (falls Shutdown): `xcrun simctl boot "AE5622ED-D44C-4B6C-B472-B234A8DABA21" && open -a Simulator --args -CurrentDeviceUDID AE5622ED-D44C-4B6C-B472-B234A8DABA21`
+- App starten: `xcrun simctl launch "AE5622ED-D44C-4B6C-B472-B234A8DABA21" "com.localconnect.app"`
+- Screenshot: `xcrun simctl io "AE5622ED-D44C-4B6C-B472-B234A8DABA21" screenshot /tmp/s.png`
+- Fuer native Aenderungen neu bauen: `xcodebuild -workspace ios/LocalSocial.xcworkspace -scheme LocalSocial -configuration Debug -destination 'id=AE5622ED-D44C-4B6C-B472-B234A8DABA21' -derivedDataPath /Users/razvan/Library/Developer/Xcode/DerivedData/LocalSocial-iOS27 build`
+- Danach installieren: `xcrun simctl install AE5622ED-D44C-4B6C-B472-B234A8DABA21 /Users/razvan/Library/Developer/Xcode/DerivedData/LocalSocial-iOS27/Build/Products/Debug-iphonesimulator/LocalSocial.app`
+- Hinweis: `expo run:ios --device ...` behandelt iOS-27-Simulatoren hier aktuell faelschlich als physische Devices und scheitert an Code Signing.
 
 ## Aktueller Fokus
 

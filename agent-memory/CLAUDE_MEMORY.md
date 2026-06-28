@@ -6,7 +6,7 @@ Quelle: `.claude/projects/-Users-razvan-Downloads-Local-Connect/memory/MEMORY.md
 
 Sichtbarer App-Name: `Locals`.
 Messenger-Fundament: Optimistic Sending, Sendestatus, Realtime-Dedupe, App-Fokus-Resync und Chat-Safety-Migration sind angelegt. Neue Supabase-Migration: `supabase/migrations/20260528090000_chat_reliability_security.sql`.
-Icon-Start im Simulator funktioniert mit Release-Build: `pnpm exec expo run:ios --configuration Release --device 1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
+Standard-Simulator fuer Locals ist ab jetzt iPhone 17 (iOS 27.0), UDID `AE5622ED-D44C-4B6C-B472-B234A8DABA21`.
 
 ## Überblick
 
@@ -88,4 +88,6 @@ Danach pruefen:
 - Kommunikation auf Deutsch
 - App-Name: "Locals"
 - Der User arbeitet im iPhone Simulator und möchte schnell zwischen Codex und Claude Code wechseln können.
-- Locals soll standardmaessig auf dem vorherigen iPhone 17 Simulator laufen: UDID `1B9DFD12-9FAC-4D2E-A50C-1925076FDBCF`.
+- Locals soll standardmaessig nur noch auf dem iPhone 17 iOS 27 Simulator laufen: UDID `AE5622ED-D44C-4B6C-B472-B234A8DABA21`.
+- Expo CLI behandelt den iOS-27-Simulator aktuell evtl. als physisches Device. Fuer Debug-Builds funktioniert:
+  `xcodebuild -workspace ios/LocalSocial.xcworkspace -scheme LocalSocial -configuration Debug -destination 'id=AE5622ED-D44C-4B6C-B472-B234A8DABA21' -derivedDataPath /Users/razvan/Library/Developer/Xcode/DerivedData/LocalSocial-iOS27 build`

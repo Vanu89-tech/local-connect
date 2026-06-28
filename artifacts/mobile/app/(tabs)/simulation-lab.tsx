@@ -10,9 +10,9 @@ const SIM_LAT = 48.3655;
 const SIM_LNG = 10.8947;
 const FRIEND_COUNT = 30;
 const LOCAL_COUNT  = 70;
-const TRANSIT_COUNT = 50;
+const TRANSIT_COUNT = 62;
 const WORLD_ICON_COUNT = 14;
-const SIM_ENGINE_VERSION = "Sim Engine V5";
+const SIM_ENGINE_VERSION = "Sim Engine V6";
 
 function buildSimHtml(lat: number, lng: number): string {
   const mapStyle  = Colors.map;
@@ -81,10 +81,17 @@ function buildSimHtml(lat: number, lng: number): string {
   .pulse { animation:pulse 2s infinite; }
   @keyframes pulse { 0%{opacity:1} 50%{opacity:0.68} 100%{opacity:1} }
   .sim-culled { opacity:0 !important; pointer-events:none !important; }
-  body.quality-weak .friend-name-tag,
-  body.quality-weak .entity-label { display:none !important; }
   body.quality-weak .sim-float-icon { animation:none !important; }
-  body.quality-medium .entity-label { display:none; }
+  .entity-marker.closed { filter:saturate(0.35) brightness(0.72); opacity:0.62; }
+  .entity-marker.busy .sim-float-icon,
+  .entity-marker.happy-hour .sim-float-icon,
+  .entity-marker.event-live .sim-float-icon { animation:floatIcon 1.25s ease-in-out infinite; }
+  .entity-marker.happy-hour .entity-label,
+  .entity-marker.event-live .entity-label { color:#efff3a; text-shadow:0 0 8px rgba(239,255,58,0.8); }
+  .friend-marker-wrap.status-social .fig-head,
+  .friend-marker-wrap.status-party .fig-head { background:#ff2bd6; box-shadow:0 0 8px rgba(255,43,214,0.95),0 0 18px rgba(255,43,214,0.55); }
+  .friend-marker-wrap.status-transit .fig-head { background:#00f0ff; box-shadow:0 0 8px rgba(0,240,255,0.95),0 0 18px rgba(0,240,255,0.55); }
+  .friend-marker-wrap.status-food .fig-head { background:#00ffb2; box-shadow:0 0 8px rgba(0,255,178,0.95),0 0 18px rgba(0,255,178,0.55); }
   .friend-pulse { animation:friendPulse 1.9s infinite; }
   @keyframes friendPulse {
     0%   { box-shadow:0 0 0 0 rgba(239,255,58,0.92),0 0 14px rgba(239,255,58,0.54); }
@@ -208,6 +215,7 @@ function buildSimHtml(lat: number, lng: number): string {
   }
   .transit-wrap.bus .transit-core { filter:drop-shadow(0 0 5px rgba(255,43,214,0.9)); }
   .transit-wrap.tram .transit-core { filter:drop-shadow(0 0 5px rgba(239,255,58,0.9)); }
+  .transit-wrap.train .transit-core { filter:drop-shadow(0 0 5px rgba(0,240,255,0.9)); }
   .transit-wrap::after {
     content:""; position:absolute; left:50%; top:50%; width:8px; height:2px;
     background:rgba(234,251,255,0.92); transform:translate(-50%, 16px);
@@ -225,6 +233,7 @@ function buildSimHtml(lat: number, lng: number): string {
   }
   .transit-screen.bus .transit-screen-core { filter:drop-shadow(0 0 5px rgba(255,43,214,0.9)); }
   .transit-screen.tram .transit-screen-core { filter:drop-shadow(0 0 5px rgba(239,255,58,0.9)); }
+  .transit-screen.train .transit-screen-core { filter:drop-shadow(0 0 5px rgba(0,240,255,0.9)); }
   .entity-marker {
     position:relative; display:flex; flex-direction:column; align-items:center; gap:4px;
     transform-origin:50% 100%; pointer-events:auto;
@@ -264,8 +273,9 @@ function buildSimHtml(lat: number, lng: number): string {
 
   /* ── Simulation HUD ──────────────────────────────────────────── */
   #sim-hud {
-    position:fixed; top:12px; left:50%; transform:translateX(-50%);
+    position:fixed; top:124px; left:50%; transform:translateX(-50%);
     display:flex; gap:6px; z-index:600; pointer-events:none; flex-wrap:nowrap;
+    max-width:calc(100vw - 28px); overflow:hidden;
   }
   .hud-chip {
     background:rgba(7,19,31,0.88); border:1px solid rgba(0,240,255,0.3);
@@ -278,14 +288,15 @@ function buildSimHtml(lat: number, lng: number): string {
 
   /* ── Simulation Controls ─────────────────────────────────────── */
   #sim-controls {
-    position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
-    display:flex; align-items:center; gap:8px;
+    position:fixed; bottom:118px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; justify-content:center; gap:7px; flex-wrap:wrap;
+    width:calc(100vw - 28px); max-width:720px;
     background:rgba(7,19,31,0.9); border:1px solid rgba(0,240,255,0.28);
-    border-radius:28px; padding:8px 16px; z-index:600;
+    border-radius:18px; padding:8px 12px; z-index:600;
     backdrop-filter:blur(12px);
   }
   .sim-btn {
-    width:36px; height:36px; border-radius:50%;
+    width:34px; height:34px; border-radius:50%;
     border:1.5px solid rgba(0,240,255,0.4); background:rgba(0,240,255,0.07);
     color:#00f0ff; font-size:15px; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
@@ -296,6 +307,10 @@ function buildSimHtml(lat: number, lng: number): string {
   .sim-sep { width:1px; height:24px; background:rgba(0,240,255,0.18); }
   .sim-label { font-size:9px; font-weight:800; color:#3a5a70; text-transform:uppercase; letter-spacing:0.5px; font-family:"Avenir Next",sans-serif; }
   .sim-val   { font-size:13px; font-weight:900; color:#efff3a; min-width:28px; text-align:center; font-family:"Avenir Next",sans-serif; }
+  .sim-btn.wide { width:auto; min-width:48px; border-radius:17px; padding:0 9px; font-weight:900; font-size:10px; }
+  body.scenario-night #parchment-overlay,
+  body.scenario-event #parchment-overlay { opacity:1; }
+  body.scenario-day #parchment-overlay { opacity:0.62; }
 </style>
 </head>
 <body>
@@ -313,9 +328,14 @@ function buildSimHtml(lat: number, lng: number): string {
   <div class="hud-chip">LOD <span id="hud-lod">3</span></div>
   <div class="hud-chip">R <span id="hud-radius">900m</span></div>
   <div class="hud-chip">PHONE <span id="hud-quality">STRONG</span></div>
+  <div class="hud-chip">SCN <span id="hud-scenario">DAY</span></div>
+  <div class="hud-chip">TIME <span id="hud-clock">14:00</span></div>
   <div class="hud-chip">⭐ <span id="hud-friends">${FRIEND_COUNT}</span> Freunde</div>
   <div class="hud-chip">🚋 <span id="hud-transit">${TRANSIT_COUNT}</span></div>
+  <div class="hud-chip">🏪 <span id="hud-places">${WORLD_ICON_COUNT}</span></div>
   <div class="hud-chip">🚶 <span id="hud-walking">0</span></div>
+  <div class="hud-chip">EVT <span id="hud-events">0</span></div>
+  <div class="hud-chip">MS <span id="hud-tickms">0</span></div>
 </div>
 
 <!-- Simulation Controls -->
@@ -330,6 +350,12 @@ function buildSimHtml(lat: number, lng: number): string {
   <button class="sim-btn on" id="profile-strong" onclick="simSetProfile('strong')" title="Strong phone">S</button>
   <button class="sim-btn" id="profile-medium" onclick="simSetProfile('medium')" title="Medium phone">M</button>
   <button class="sim-btn" id="profile-weak" onclick="simSetProfile('weak')" title="Weak phone">W</button>
+  <div class="sim-sep"></div>
+  <button class="sim-btn wide on" id="scenario-day" onclick="simSetScenario('day')" title="Normaler Tag">DAY</button>
+  <button class="sim-btn wide" id="scenario-rush" onclick="simSetScenario('rush')" title="Feierabendverkehr">RUSH</button>
+  <button class="sim-btn wide" id="scenario-night" onclick="simSetScenario('night')" title="Bars und Clubs">NITE</button>
+  <button class="sim-btn wide" id="scenario-event" onclick="simSetScenario('event')" title="Grossevent">EVT</button>
+  <button class="sim-btn wide" id="scenario-stress" onclick="simSetScenario('stress')" title="Stress Test">LOAD</button>
 </div>
 
 <script>
@@ -354,6 +380,48 @@ var LOCAL_NAMES = [
   'Bram','Sasha','Aya','Mihail','Bettina','Kwame','Ren','Ayasha','Freya','Stavros',
   'Nadège','Tobia','Rim','Seun','Hana','Matteo','Linh','Boris','Amara','Ezra'
 ];
+var USER_ACTIVITIES = [
+  { id:'idle', label:'gerade online', status:'online', weight:20 },
+  { id:'walk', label:'unterwegs', status:'moving', weight:20 },
+  { id:'food', label:'essen', status:'food', weight:12 },
+  { id:'social', label:'trifft Leute', status:'social', weight:14 },
+  { id:'party', label:'im Nachtleben', status:'party', weight:8 },
+  { id:'transit', label:'fährt mit Öffis', status:'transit', weight:10 },
+  { id:'quiet', label:'nicht stören', status:'quiet', weight:6 },
+];
+var SCENARIOS = {
+  day:    { label:'DAY',   timeHour:14, userSpeed:1.0, transitSpeed:1.0, crowd:0.42, eventRate:0.32, loadBudget:1.0 },
+  rush:   { label:'RUSH',  timeHour:17, userSpeed:1.12, transitSpeed:0.86, crowd:0.62, eventRate:0.46, loadBudget:1.12 },
+  night:  { label:'NITE',  timeHour:22, userSpeed:0.92, transitSpeed:0.92, crowd:0.78, eventRate:0.72, loadBudget:1.0 },
+  event:  { label:'EVT',   timeHour:20, userSpeed:1.04, transitSpeed:0.78, crowd:0.88, eventRate:0.9,  loadBudget:1.18 },
+  stress: { label:'LOAD',  timeHour:19, userSpeed:1.18, transitSpeed:1.1,  crowd:0.95, eventRate:1.0,  loadBudget:1.7 },
+};
+var SIM_STATE = {
+  scenario:'day',
+  simMinute:14 * 60,
+  tickMs:0,
+  adapterMs:0,
+  eventCount:0,
+  lastSnapshotAt:0,
+  loadFactor:1,
+};
+
+function currentScenario() { return SCENARIOS[SIM_STATE.scenario] || SCENARIOS.day; }
+function weightedActivity(seedValue) {
+  var total = USER_ACTIVITIES.reduce(function(sum, a) { return sum + a.weight; }, 0);
+  var roll = seeded(seedValue) * total;
+  for (var i = 0; i < USER_ACTIVITIES.length; i++) {
+    roll -= USER_ACTIVITIES[i].weight;
+    if (roll <= 0) return USER_ACTIVITIES[i];
+  }
+  return USER_ACTIVITIES[0];
+}
+function simClockLabel() {
+  var minutes = Math.floor(SIM_STATE.simMinute % (24 * 60));
+  var h = Math.floor(minutes / 60);
+  var m = minutes % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COORDINATE HELPERS
@@ -392,21 +460,21 @@ var QUALITY = {
     label: 'WEAK',
     tickMs: 50,
     budget: 150,
-    typeRadius: { transit: 1.0, friend: 0.7, person: 0.4, poi: 0.5 },
+    typeRadius: { transit: 1.0, friend: 1.0, person: 1.0, poi: 1.0 },
     typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
     labelDistanceM: 150,
-    lodRadiusM: 500,
-    minZoom: 14.45,
+    lodRadiusM: 2200,
+    minZoom: 11.75,
   },
   medium: {
     label: 'MID',
     tickMs: 33,
     budget: 350,
-    typeRadius: { transit: 1.0, friend: 0.9, person: 0.7, poi: 0.8 },
+    typeRadius: { transit: 1.0, friend: 1.0, person: 1.0, poi: 1.0 },
     typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
     labelDistanceM: 320,
-    lodRadiusM: 1100,
-    minZoom: 13.35,
+    lodRadiusM: 2200,
+    minZoom: 11.75,
   },
   strong: {
     label: 'STRONG',
@@ -451,7 +519,7 @@ function updatePerformanceSample() {
   PERF.frameMs = PERF.frameMs * 0.88 + dt * 0.12;
   PERF.fps = PERF.fps * 0.88 + (1000 / dt) * 0.12;
 
-  if (now - PERF.lastQualityCheck > 1400) {
+  if (!_LOD_CAMERA_ACTIVE && now - PERF.lastQualityCheck > 1400) {
     PERF.lastQualityCheck = now;
     if ((PERF.fps < 52 || PERF.frameMs > 19) && PERF.quality === 'strong') setQuality('medium');
     else if ((PERF.fps < 50 || PERF.frameMs > 21) && PERF.quality === 'medium') setQuality('weak');
@@ -464,7 +532,7 @@ function updatePerformanceSample() {
 }
 
 var _LOD_SHOW = 0.06;
-var _LOD_HIDE = 0.02;
+var _LOD_CAMERA_ACTIVE = false;
 
 function lodScore(distanceM, kind, zoom) {
   var profile = QUALITY[PERF.quality];
@@ -477,17 +545,17 @@ function lodScore(distanceM, kind, zoom) {
   return Math.max(0, Math.min(1, smooth + zBonus));
 }
 
-function applyLodValue(el, score, wasVisible) {
+function setLodVisibility(el, visible, score) {
   if (!el) return false;
-  var visible = wasVisible ? score > _LOD_HIDE : score > _LOD_SHOW;
   if (!visible) {
     if (!el.classList.contains('sim-culled')) el.classList.add('sim-culled');
     el.dataset.lod = '0';
     return false;
   }
   el.classList.remove('sim-culled');
-  var scale = Math.min(1.12, 0.55 + score * 0.57);
-  var opacity = Math.min(1.0, 0.25 + score * 0.95);
+  var displayScore = Math.max(_LOD_SHOW, score || 0);
+  var scale = Math.min(1.12, 0.55 + displayScore * 0.57);
+  var opacity = Math.min(1.0, 0.25 + displayScore * 0.95);
   el.style.setProperty('--lod-scale', scale.toFixed(3));
   el.style.opacity = opacity.toFixed(3);
   el.dataset.lod = '1';
@@ -496,19 +564,22 @@ function applyLodValue(el, score, wasVisible) {
 
 function updateLodForAll() {
   if (!window._simMarkers || !window._worldMarkers || !window._transitMarkers || !window.map) return;
+  updateLodRadiusOverlay();
   var center = map.getCenter();
   var zoom = map.getZoom();
   var profile = QUALITY[PERF.quality];
-  updateLodRadiusOverlay();
 
   var candidates = [];
 
   function addEntry(entry, lat, lng, kind, priority) {
     var d = distM(center.lat, center.lng, lat, lng);
     var score = lodScore(d, kind, zoom);
+    var radiusM = (profile.typeRadius[kind] || 1.0) * profile.lodRadiusM;
     var wasVisible = entry._lodVisible || false;
     candidates.push({
       entry: entry,
+      distanceM: d,
+      radiusM: radiusM,
       score: score,
       sortVal: score * (1 + (priority || 0) * 0.004) + (wasVisible ? 0.04 : 0),
       cost: profile.typeCost[kind] || 2,
@@ -534,23 +605,13 @@ function updateLodForAll() {
 
   candidates.sort(function(a, b) { return b.sortVal - a.sortVal; });
 
-  var budget = profile.budget;
-  var budgetHysteresis = budget * 0.1;
-  var spent = 0;
   var visible = 0;
 
   candidates.forEach(function(item) {
-    var show = false;
-    if (item.score <= 0) {
-      show = false;
-    } else if (spent < budget) {
-      show = item.score > _LOD_SHOW;
-    } else if (item.wasVisible && spent < budget + budgetHysteresis) {
-      show = item.score > _LOD_HIDE;
-    }
     var el = item.entry.wrap || item.entry.el;
-    item.entry._lodVisible = applyLodValue(el, show ? item.score : 0, item.wasVisible);
-    if (item.entry._lodVisible) { spent += item.cost; visible++; }
+    var insideRadius = item.distanceM <= item.radiusM;
+    item.entry._lodVisible = setLodVisibility(el, insideRadius, insideRadius ? item.score : 0);
+    if (item.entry._lodVisible) visible++;
   });
 
   PERF.visibleEntities = visible;
@@ -608,8 +669,15 @@ var SIM = (function() {
       var p = offsetPoint(anchor.n + Math.sin(angle) * dist, anchor.e + Math.cos(angle) * dist);
       agents.push({
         id: 'sim-friend-' + fi,
+        entityType: 'user',
+        source: 'mockUsersAdapter',
         name: FRIEND_NAMES[fi],
         isFriend: true,
+        relation: 'friend',
+        visibility: 'friends',
+        online: true,
+        activity: weightedActivity(fi * 11.1),
+        priority: 86,
         lat: p.lat,
         lng: p.lng,
         maxRadius: 980,
@@ -618,6 +686,7 @@ var SIM = (function() {
         idleUntil: Date.now() + seeded(fi * 17) * 7000,
         targetLat: null, targetLng: null,
         heading: seeded(fi * 23) * 360,
+        updatedAt: Date.now(),
         // extensibility data bag – mechanics can add arbitrary properties
         data: {},
       });
@@ -631,8 +700,15 @@ var SIM = (function() {
       var lp = offsetPoint(localAnchor.n + Math.sin(angle2) * dist2, localAnchor.e + Math.cos(angle2) * dist2);
       agents.push({
         id: 'sim-local-' + li,
+        entityType: 'user',
+        source: 'mockUsersAdapter',
         name: LOCAL_NAMES[li],
         isFriend: false,
+        relation: 'public',
+        visibility: 'public',
+        online: seeded(li * 13.4 + 400) > 0.08,
+        activity: weightedActivity(li * 8.9 + 300),
+        priority: 42,
         lat: lp.lat,
         lng: lp.lng,
         maxRadius: 1500,
@@ -641,6 +717,7 @@ var SIM = (function() {
         idleUntil: Date.now() + seeded(li * 19 + 700) * 9000,
         targetLat: null, targetLng: null,
         heading: seeded(li * 29 + 800) * 360,
+        updatedAt: Date.now(),
         data: {},
       });
     }
@@ -655,9 +732,18 @@ var SIM = (function() {
 
   function pickTarget(agent) {
     var angle = Math.random() * Math.PI * 2;
-    var step  = 40 + Math.random() * 180;
+    var scenario = currentScenario();
+    var step  = 40 + Math.random() * (agent.activity && agent.activity.id === 'transit' ? 260 : 180);
     var nLat  = agent.lat + metersToLat(Math.sin(angle) * step);
     var nLng  = agent.lng + metersToLng(Math.cos(angle) * step, agent.lat);
+    if (WORLD_ENTITIES && WORLD_ENTITIES.length && Math.random() < scenario.crowd * 0.24) {
+      var place = WORLD_ENTITIES[Math.floor(Math.random() * WORLD_ENTITIES.length)];
+      nLat = place.lat + metersToLat((Math.random() - 0.5) * 38);
+      nLng = place.lng + metersToLng((Math.random() - 0.5) * 38, place.lat);
+      agent.data.destinationId = place.id;
+    } else {
+      agent.data.destinationId = null;
+    }
     if (distM(SIM_LAT, SIM_LNG, nLat, nLng) > agent.maxRadius) {
       angle = Math.atan2(SIM_LNG - agent.lng, SIM_LAT - agent.lat) + (Math.random() - 0.5) * 1.2;
       step  = 60 + Math.random() * 120;
@@ -669,24 +755,33 @@ var SIM = (function() {
     agent.heading   = Math.atan2(nLng - agent.lng, nLat - agent.lat) * 180 / Math.PI;
     var prevState   = agent.state;
     agent.state     = 'walk';
+    if (Math.random() < 0.34) agent.activity = weightedActivity(Date.now() * 0.001 + agent.heading);
+    agent.updatedAt = Date.now();
     if (prevState !== 'walk') runMechanicHook('onAgentStateChange', [agent, 'walk', prevState]);
   }
 
   function tick() {
     if (!playing) return;
+    var tickStarted = performance.now();
     updatePerformanceSample();
     var now = Date.now();
     if (cameraInteracting) {
       lastTick = now;
+      updateTransitScreenPositions();
       updateLodForAll();
       return;
     }
-    var dt  = Math.min(now - lastTick, 200) * speedMult;
+    var scenario = currentScenario();
+    var rawDt = Math.min(now - lastTick, 200);
+    var dt  = rawDt * speedMult;
+    SIM_STATE.simMinute += (rawDt / 1000) * speedMult * 0.55;
     lastTick = now;
     var walkCount = 0;
 
     runMechanicHook('onTick', [agents, dt]);
     updateTransit(dt);
+    updateWorldEntities(now);
+    runLiveEventEngine(now, dt);
 
     agents.forEach(function(agent) {
       if (agent.state === 'idle') {
@@ -695,13 +790,16 @@ var SIM = (function() {
         var dLat  = agent.targetLat - agent.lat;
         var dLng  = agent.targetLng - agent.lng;
         var d     = distM(agent.lat, agent.lng, agent.targetLat, agent.targetLng);
-        var stepM = agent.speed * dt / 1000;
+        var activityBoost = agent.activity && agent.activity.id === 'transit' ? 1.3 : 1;
+        var stepM = agent.speed * scenario.userSpeed * activityBoost * dt / 1000;
         if (d < stepM + 0.3) {
           agent.lat = agent.targetLat;
           agent.lng = agent.targetLng;
           var prev  = agent.state;
           agent.state    = 'idle';
           agent.idleUntil = now + 2000 + Math.random() * 9000;
+          agent.updatedAt = now;
+          if (Math.random() < currentScenario().eventRate * 0.18) agent.activity = weightedActivity(now * 0.003 + agent.lat);
           runMechanicHook('onAgentArrived', [agent]);
           if (prev !== 'idle') runMechanicHook('onAgentStateChange', [agent, 'idle', prev]);
         } else {
@@ -719,6 +817,7 @@ var SIM = (function() {
       if (!entry) return;
       entry.marker.setLngLat([agent.lng, agent.lat]);
       entry.agent = agent;
+      applyUserStatus(entry, agent);
       if (entry.fig) {
         // speed derived from state (idle=0, walk=1.0, run=3.0)
         var spd = agent.state === 'walk' ? agent.speed : agent.state === 'run' ? 3.0 : 0;
@@ -728,6 +827,23 @@ var SIM = (function() {
     });
 
     document.getElementById('hud-walking').textContent = String(walkCount);
+    var snapshot = collectLiveSnapshot();
+    var hudTotal = document.getElementById('hud-total');
+    if (hudTotal) hudTotal.textContent = String(snapshot.users.length + snapshot.transit.length + snapshot.places.length + snapshot.events.length);
+    var hudPlaces = document.getElementById('hud-places');
+    if (hudPlaces) hudPlaces.textContent = String(snapshot.places.length);
+    var hudClock = document.getElementById('hud-clock');
+    if (hudClock) hudClock.textContent = simClockLabel();
+    var hudEvents = document.getElementById('hud-events');
+    if (hudEvents) hudEvents.textContent = String(snapshot.events.length);
+    var hudTransit = document.getElementById('hud-transit');
+    if (hudTransit) hudTransit.textContent = String(snapshot.transit.length);
+    var hudFriends = document.getElementById('hud-friends');
+    if (hudFriends) hudFriends.textContent = String(snapshot.users.filter(function(e) { return e.payload && e.payload.isFriend; }).length);
+    var tickCost = performance.now() - tickStarted;
+    SIM_STATE.tickMs = SIM_STATE.tickMs * 0.82 + tickCost * 0.18;
+    var hudTick = document.getElementById('hud-tickms');
+    if (hudTick) hudTick.textContent = SIM_STATE.tickMs.toFixed(1);
     updateLodForAll();
   }
 
@@ -736,7 +852,16 @@ var SIM = (function() {
     registerMechanic: registerMechanic,
     setPlaying: function(v) { playing = v; if (v) lastTick = Date.now(); },
     isPlaying: function() { return playing; },
-    setCameraInteracting: function(v) { cameraInteracting = v; if (!v) lastTick = Date.now(); },
+    setCameraInteracting: function(v) {
+      cameraInteracting = v;
+      _LOD_CAMERA_ACTIVE = v;
+      document.body.classList.toggle('camera-active', v);
+      if (!v) {
+        lastTick = Date.now();
+        PERF.lastFrame = performance.now();
+        PERF.lastQualityCheck = performance.now();
+      }
+    },
     setSpeed: function(v) { speedMult = v; },
     tick: tick,
   };
@@ -752,6 +877,9 @@ function buildTransitEntities() {
     { id:'tram-3', type:'tram', label:'3', speed:15, count:5, points:[[230,180],[-120,-120],[-760,-760],[-1400,-1460],[-2160,-2140],[-2860,-2750]] },
     { id:'tram-4', type:'tram', label:'4', speed:13, count:4, points:[[1160,620],[620,320],[0,0],[-450,-260],[-980,-500],[-1480,-720],[-1960,-860]] },
     { id:'tram-6', type:'tram', label:'6', speed:15, count:5, points:[[1450,2300],[860,1460],[320,620],[0,0],[-460,-620],[-920,-1260],[-1400,-2020],[-1840,-2760]] },
+    { id:'train-r1', type:'train', label:'R1', speed:24, count:3, points:[[-3600,2600],[-1980,1420],[-720,520],[0,0],[980,-620],[2100,-1320],[3500,-2200]] },
+    { id:'train-r2', type:'train', label:'R2', speed:22, count:3, points:[[3300,1800],[1900,960],[760,360],[0,0],[-920,-420],[-2160,-980],[-3400,-1540]] },
+    { id:'train-s', type:'train', label:'S', speed:20, count:3, points:[[2600,-2600],[1600,-1500],[720,-620],[0,0],[-820,740],[-1780,1640],[-2700,2500]] },
     { id:'bus-21', type:'bus', label:'21', speed:11, count:3, points:[[1680,-1180],[1120,-620],[520,-160],[0,0],[-540,120],[-1040,420]] },
     { id:'bus-22', type:'bus', label:'22', speed:11, count:3, points:[[1200,1600],[720,920],[180,280],[0,0],[-380,-620],[-760,-1240]] },
     { id:'bus-23', type:'bus', label:'23', speed:10, count:3, points:[[2300,80],[1500,80],[760,60],[0,0],[-780,-80],[-1500,-160]] },
@@ -784,7 +912,7 @@ function buildTransitEntities() {
         lat:sampled.lat,
         lng:sampled.lng,
         heading:sampled.heading,
-        priority:route.type === 'tram' ? 92 : 82,
+        priority:route.type === 'train' ? 96 : route.type === 'tram' ? 92 : 82,
       });
     }
   });
@@ -829,27 +957,82 @@ function pointOnRoute(points, progress) {
 
 function buildWorldEntities() {
   var labels = [
-    ['shop','Market','M',-120,-440], ['shop','Cafe','C',60,-260], ['event','Live','!',250,-180],
-    ['shop','Kiosk','K',-360,120], ['shop','Bakery','B',180,340], ['event','Meet','+',-520,-180],
-    ['shop','Book','R',430,120], ['event','Music','~',-120,560], ['shop','Food','F',620,-420],
-    ['shop','Style','S',-760,420], ['event','Pulse','*',860,260], ['shop','Night','N',-980,-360],
-    ['event','Open','O',340,760], ['shop','Bike','V',-280,-760],
+    ['shop','Market','M',-120,-440,8,20], ['bar','Cafe','C',60,-260,7,23], ['event','Live','!',250,-180,18,24],
+    ['shop','Kiosk','K',-360,120,6,22], ['shop','Bakery','B',180,340,6,18], ['event','Meet','+',-520,-180,17,23],
+    ['shop','Book','R',430,120,10,19], ['club','Music','~',-120,560,21,4], ['food','Food','F',620,-420,11,23],
+    ['shop','Style','S',-760,420,10,20], ['event','Pulse','*',860,260,19,2], ['club','Night','N',-980,-360,22,5],
+    ['bar','Open','O',340,760,16,2], ['shop','Bike','V',-280,-760,9,19],
   ];
   return labels.map(function(item, index) {
     return {
       id:item[0] + '-' + index,
+      entityType:'place',
+      source:'mockPlacesAdapter',
       type:item[0],
       label:item[1],
       icon:item[2],
       lat:SIM_LAT + metersToLat(item[3]),
       lng:SIM_LNG + metersToLng(item[4], SIM_LAT),
-      priority:item[0] === 'event' ? 74 : 58,
+      openHour:item[5],
+      closeHour:item[6],
+      state:'open',
+      crowd:0,
+      offer:null,
+      updatedAt:Date.now(),
+      priority:item[0] === 'event' || item[0] === 'club' ? 74 : 58,
     };
   });
 }
 
 var TRANSIT = buildTransitEntities();
 var WORLD_ENTITIES = buildWorldEntities();
+var LIVE_EVENTS = [];
+
+function createSnapshotEntity(entity, type) {
+  return {
+    id: entity.id,
+    type: type,
+    source: entity.source || 'mockAdapter',
+    position: { lat: entity.lat, lng: entity.lng },
+    priority: entity.priority || 50,
+    updatedAt: entity.updatedAt || Date.now(),
+    visibility: entity.visibility || 'public',
+    renderMode: entity.renderMode || 'marker',
+    payload: entity,
+  };
+}
+
+var SIM_ADAPTERS = {
+  users: {
+    name:'mockUsersAdapter',
+    snapshot:function() { return SIM.agents.map(function(agent) { return createSnapshotEntity(agent, 'user'); }); },
+  },
+  transit: {
+    name:'mockTransitAdapter',
+    snapshot:function() { return TRANSIT.map(function(entity) { return createSnapshotEntity(entity, 'transit'); }); },
+  },
+  places: {
+    name:'mockPlacesAdapter',
+    snapshot:function() { return WORLD_ENTITIES.map(function(entity) { return createSnapshotEntity(entity, 'place'); }); },
+  },
+  events: {
+    name:'mockEventsAdapter',
+    snapshot:function() { return LIVE_EVENTS.map(function(entity) { return createSnapshotEntity(entity, 'event'); }); },
+  },
+};
+
+function collectLiveSnapshot() {
+  var started = performance.now();
+  var snapshot = {
+    users: SIM_ADAPTERS.users.snapshot(),
+    transit: SIM_ADAPTERS.transit.snapshot(),
+    places: SIM_ADAPTERS.places.snapshot(),
+    events: SIM_ADAPTERS.events.snapshot(),
+  };
+  SIM_STATE.adapterMs = performance.now() - started;
+  SIM_STATE.lastSnapshotAt = Date.now();
+  return snapshot;
+}
 
 function transitEl(entity) {
   var wrap = document.createElement('div');
@@ -865,7 +1048,7 @@ function transitEl(entity) {
   core.style.fontSize = entity.type === 'tram' ? '20px' : '18px';
   core.style.lineHeight = '1';
   core.style.transformOrigin = '50% 50%';
-  core.textContent = entity.type === 'tram' ? '🚊' : '🚌';
+  core.textContent = entity.type === 'train' ? '🚆' : entity.type === 'tram' ? '🚊' : '🚌';
   wrap.appendChild(core);
   return wrap;
 }
@@ -875,7 +1058,7 @@ function transitScreenEl(entity) {
   wrap.className = 'transit-screen ' + entity.type;
   var core = document.createElement('div');
   core.className = 'transit-screen-core';
-  core.textContent = entity.type === 'tram' ? '🚊' : '🚌';
+  core.textContent = entity.type === 'train' ? '🚆' : entity.type === 'tram' ? '🚊' : '🚌';
   wrap.appendChild(core);
   return { wrap: wrap, core: core };
 }
@@ -897,7 +1080,7 @@ function updateTransitScreenPositions() {
 
 function worldEntityEl(entity) {
   var wrap = document.createElement('div');
-  wrap.className = 'entity-marker ' + entity.type;
+  wrap.className = 'entity-marker ' + entity.type + ' ' + entity.state;
   var icon = document.createElement('div');
   icon.className = 'sim-float-icon';
   icon.textContent = entity.icon;
@@ -909,11 +1092,116 @@ function worldEntityEl(entity) {
   return wrap;
 }
 
+function isPlaceOpen(entity, hour) {
+  var open = entity.openHour;
+  var close = entity.closeHour;
+  if (open == null || close == null) return true;
+  if (close < open) return hour >= open || hour < close;
+  return hour >= open && hour < close;
+}
+
+function placeState(entity, hour) {
+  var scenario = currentScenario();
+  var open = isPlaceOpen(entity, hour);
+  if (!open) return 'closed';
+  if (entity.type === 'club' && (SIM_STATE.scenario === 'night' || hour >= 22 || hour < 3)) return 'event-live';
+  if (entity.type === 'event' && scenario.eventRate > 0.65) return 'event-live';
+  if ((entity.type === 'bar' || entity.type === 'food') && (hour === 17 || hour === 18 || SIM_STATE.scenario === 'night')) return 'happy-hour';
+  if (scenario.crowd > 0.72 && seeded(entity.priority + hour) > 0.35) return 'busy';
+  return 'open';
+}
+
+function updateWorldEntityVisual(entry) {
+  if (!entry || !entry.wrap || !entry.entity) return;
+  var entity = entry.entity;
+  entry.wrap.className = 'entity-marker ' + entity.type + ' ' + entity.state;
+  var label = entry.wrap.querySelector('.entity-label');
+  if (label) {
+    label.textContent = entity.offer ? entity.label + ' · ' + entity.offer : entity.label;
+  }
+}
+
+function updateWorldEntities(now) {
+  var scenario = currentScenario();
+  var hour = Math.floor(SIM_STATE.simMinute / 60) % 24;
+  WORLD_ENTITIES.forEach(function(entity, index) {
+    var nextState = placeState(entity, hour);
+    var crowdBase = scenario.crowd * (entity.type === 'club' || entity.type === 'event' ? 1.25 : 0.82);
+    entity.crowd = clamp(crowdBase + seeded(index + hour * 3.7) * 0.24, 0, 1);
+    entity.offer = nextState === 'happy-hour' ? 'Happy Hour' : nextState === 'event-live' ? 'Live' : null;
+    if (entity.state !== nextState) {
+      entity.state = nextState;
+      entity.updatedAt = now;
+      updateWorldEntityVisual(window._worldMarkers && window._worldMarkers[entity.id]);
+    }
+  });
+}
+
+function applyUserStatus(entry, agent) {
+  if (!entry || !agent) return;
+  var status = agent.activity && agent.activity.status ? agent.activity.status : 'online';
+  var wrap = entry.wrap || entry.el;
+  if (!wrap) return;
+  ['status-online','status-moving','status-food','status-social','status-party','status-transit','status-quiet'].forEach(function(cls) {
+    wrap.classList.remove(cls);
+  });
+  wrap.classList.add('status-' + status);
+  var popup = wrap.querySelector && wrap.querySelector('.fig-popup-sub');
+  if (popup && agent.activity) popup.textContent = (agent.isFriend ? 'Freund' : 'Local') + ' · ' + agent.activity.label;
+}
+
+function pushLiveEvent(kind, label, entityId) {
+  var evt = {
+    id:'evt-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
+    entityType:'event',
+    source:'mockEventsAdapter',
+    kind:kind,
+    label:label,
+    entityId:entityId,
+    lat:SIM_LAT + metersToLat((Math.random() - 0.5) * 1500),
+    lng:SIM_LNG + metersToLng((Math.random() - 0.5) * 1500, SIM_LAT),
+    priority:88,
+    updatedAt:Date.now(),
+    expiresAt:Date.now() + 42000,
+  };
+  LIVE_EVENTS.push(evt);
+  if (LIVE_EVENTS.length > 24) LIVE_EVENTS.shift();
+  SIM_STATE.eventCount++;
+}
+
+function runLiveEventEngine(now, dt) {
+  LIVE_EVENTS = LIVE_EVENTS.filter(function(evt) { return evt.expiresAt > now; });
+  var scenario = currentScenario();
+  if (Math.random() > scenario.eventRate * dt / 72000) return;
+  var roll = Math.random();
+  if (roll < 0.32 && TRANSIT.length) {
+    var t = TRANSIT[Math.floor(Math.random() * TRANSIT.length)];
+    t.delaySec = Math.min(420, (t.delaySec || 0) + 45 + Math.floor(Math.random() * 120));
+    pushLiveEvent('transit-delay', 'Linie ' + t.label + ' verspätet', t.id);
+  } else if (roll < 0.64 && WORLD_ENTITIES.length) {
+    var p = WORLD_ENTITIES[Math.floor(Math.random() * WORLD_ENTITIES.length)];
+    p.state = p.type === 'bar' || p.type === 'food' ? 'happy-hour' : 'event-live';
+    p.offer = p.state === 'happy-hour' ? 'Happy Hour' : 'Live';
+    p.updatedAt = now;
+    updateWorldEntityVisual(window._worldMarkers && window._worldMarkers[p.id]);
+    pushLiveEvent('place-pulse', p.label + ' ist aktiv', p.id);
+  } else if (SIM.agents.length) {
+    var u = SIM.agents[Math.floor(Math.random() * SIM.agents.length)];
+    u.online = true;
+    u.activity = weightedActivity(now * 0.002 + u.lat);
+    u.updatedAt = now;
+    pushLiveEvent('user-status', u.name + ': ' + u.activity.label, u.id);
+  }
+}
+
 function updateTransit(dt) {
+  var scenario = currentScenario();
   TRANSIT.forEach(function(entity) {
     var prevLat = entity.lat;
     var prevLng = entity.lng;
-    entity.progress += entity.direction * (entity.speedMps * dt / 1000) / entity.routeLengthM;
+    var delayFactor = entity.delaySec ? clamp(1 - entity.delaySec / 700, 0.42, 1) : 1;
+    entity.progress += entity.direction * (entity.speedMps * scenario.transitSpeed * delayFactor * dt / 1000) / entity.routeLengthM;
+    entity.delaySec = Math.max(0, (entity.delaySec || 0) - dt / 1000);
     if (entity.progress > 1) entity.progress -= 1;
     if (entity.progress < 0) entity.progress += 1;
     var sampled = pointOnRoute(entity.routePoints, entity.progress);
@@ -1078,7 +1366,7 @@ map.on('load', function() {
       var popup = document.createElement('div');
       popup.className = 'fig-popup-inner';
       var pn = document.createElement('span'); pn.className='fig-popup-name'; pn.textContent=agent.name;
-      var ps = document.createElement('span'); ps.className='fig-popup-sub';  ps.textContent='Freund · Simulation';
+      var ps = document.createElement('span'); ps.className='fig-popup-sub';  ps.textContent='Freund · ' + agent.activity.label;
       popup.appendChild(pn); popup.appendChild(ps);
       fr.wrap.appendChild(popup);
       popup.addEventListener('click', function(e) { e.stopPropagation(); });
@@ -1101,6 +1389,7 @@ map.on('load', function() {
       var marker = new maplibregl.Marker({ element:fr.wrap, anchor:'center' })
         .setLngLat([agent.lng, agent.lat]).addTo(map);
       window._simMarkers[agent.id] = { marker:marker, fig:fr.fig, wrap:fr.wrap, agent:agent };
+      applyUserStatus(window._simMarkers[agent.id], agent);
 
     } else {
       // ── Local: small circle (identical to real map) ───────────────
@@ -1110,9 +1399,10 @@ map.on('load', function() {
       el.style.animationDelay = delay;
       var localMarker = new maplibregl.Marker({ element:el, anchor:'center' })
         .setLngLat([agent.lng, agent.lat])
-        .setPopup(new maplibregl.Popup({ closeButton:false, offset:10 }).setHTML(infoSheetHtml(agent.name, 'Local · Simulation')))
+        .setPopup(new maplibregl.Popup({ closeButton:false, offset:10 }).setHTML(infoSheetHtml(agent.name, 'Local · ' + agent.activity.label)))
         .addTo(map);
       window._simMarkers[agent.id] = { marker:localMarker, fig:null, el:el, agent:agent };
+      applyUserStatus(window._simMarkers[agent.id], agent);
     }
   });
 
@@ -1128,17 +1418,18 @@ map.on('load', function() {
     el.style.animationDelay = (idx * 0.08) + 's';
     var marker = new maplibregl.Marker({ element:el, anchor:'bottom' })
       .setLngLat([entity.lng, entity.lat])
-      .setPopup(new maplibregl.Popup({ closeButton:false, offset:16 }).setHTML(infoSheetHtml(entity.label, (entity.type === 'event' ? 'Event' : 'Ort') + ' · Simulation')))
+      .setPopup(new maplibregl.Popup({ closeButton:false, offset:16 }).setHTML(infoSheetHtml(entity.label, (entity.type === 'event' ? 'Event' : 'Ort') + ' · ' + entity.state)))
       .addTo(map);
     window._worldMarkers[entity.id] = { marker:marker, wrap:el, entity:entity };
+    updateWorldEntityVisual(window._worldMarkers[entity.id]);
   });
+  simSetScenario('day');
 
   map.on('move', function() { updateTransitScreenPositions(); updateLodForAll(); });
   map.on('zoom', function() { updateTransitScreenPositions(); updateLodForAll(); });
   map.on('resize', function() { updateTransitScreenPositions(); updateLodForAll(); });
   map.on('dragstart', function() { SIM.setCameraInteracting(true); });
   map.on('movestart', function() { SIM.setCameraInteracting(true); });
-  map.on('dragend', function() { SIM.setCameraInteracting(false); });
   map.on('moveend', function() { SIM.setCameraInteracting(false); updateLodForAll(); });
   updateLodForAll();
 
@@ -1178,6 +1469,40 @@ function simChangeSpeed(d) {
 
 function simSetProfile(profile) {
   setQuality(profile);
+  updateLodForAll();
+}
+
+function simSetScenario(name) {
+  if (!SCENARIOS[name]) return;
+  SIM_STATE.scenario = name;
+  var scenario = currentScenario();
+  SIM_STATE.simMinute = scenario.timeHour * 60;
+  SIM_STATE.loadFactor = scenario.loadBudget;
+  document.body.classList.remove('scenario-day','scenario-rush','scenario-night','scenario-event','scenario-stress');
+  document.body.classList.add('scenario-' + name);
+  ['day','rush','night','event','stress'].forEach(function(id) {
+    var btn = document.getElementById('scenario-' + id);
+    if (btn) btn.classList.toggle('on', id === name);
+  });
+  var hudScenario = document.getElementById('hud-scenario');
+  if (hudScenario) hudScenario.textContent = scenario.label;
+  TRANSIT.forEach(function(t, index) {
+    if (name === 'rush' || name === 'event') t.delaySec = 30 + seeded(index * 9.2) * 260;
+    else if (name === 'stress') t.delaySec = seeded(index * 3.4) * 120;
+    else t.delaySec = 0;
+  });
+  SIM.agents.forEach(function(agent, index) {
+    var activitySeed = index * 18.7 + scenario.timeHour * 10;
+    agent.online = name === 'stress' ? true : seeded(activitySeed) > (agent.isFriend ? 0.02 : 0.08);
+    if (name === 'night' && seeded(activitySeed + 5) > 0.45) agent.activity = USER_ACTIVITIES[4];
+    else if (name === 'rush' && seeded(activitySeed + 6) > 0.48) agent.activity = USER_ACTIVITIES[5];
+    else if (name === 'event' && seeded(activitySeed + 7) > 0.38) agent.activity = USER_ACTIVITIES[3];
+    else agent.activity = weightedActivity(activitySeed);
+    agent.updatedAt = Date.now();
+    applyUserStatus(window._simMarkers && window._simMarkers[agent.id], agent);
+  });
+  updateWorldEntities(Date.now());
+  pushLiveEvent('scenario', 'Szenario ' + scenario.label + ' gestartet', name);
   updateLodForAll();
 }
 
