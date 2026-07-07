@@ -18,21 +18,21 @@ function PulseRing({
   const opacity = useRef(new Animated.Value(0.7)).current;
 
   useEffect(() => {
-    const animate = () =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.parallel([
-            Animated.timing(scale,   { toValue: 1,   duration: 2200, useNativeDriver: true }),
-            Animated.timing(opacity, { toValue: 0,   duration: 2200, useNativeDriver: true }),
-          ]),
-          Animated.parallel([
-            Animated.timing(scale,   { toValue: 0.3, duration: 0, useNativeDriver: true }),
-            Animated.timing(opacity, { toValue: 0.7, duration: 0, useNativeDriver: true }),
-          ]),
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.parallel([
+          Animated.timing(scale,   { toValue: 1,   duration: 2200, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0,   duration: 2200, useNativeDriver: true }),
         ]),
-      ).start();
-    animate();
+        Animated.parallel([
+          Animated.timing(scale,   { toValue: 0.3, duration: 0, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0.7, duration: 0, useNativeDriver: true }),
+        ]),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
   }, [delay, opacity, scale]);
 
   return (

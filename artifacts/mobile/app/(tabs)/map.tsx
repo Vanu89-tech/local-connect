@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Modal,
   PanResponder,
   Platform,
@@ -37,45 +38,11 @@ const MAP_QUERY_LIMIT = 250;
 const MAP_REFRESH_MS = 30000;
 const FRIEND_REFRESH_MS = 90000;
 const PRESENCE_HEARTBEAT_MS = 30000;
-const ONLINE_STALE_MINUTES = 20;
+const ONLINE_STALE_MINUTES = 2;
 const LIVE_POI_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_POI_RADIUS_METERS = 1800;
 const LIVE_POI_LIMIT = 180;
-const SIMULATION_ENABLED = __DEV__;
-const SIMULATION_FRIEND_COUNT = 10;
-const SIMULATION_LOCAL_COUNT = 46;
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
-
-// Mock seed parties (relative to home location)
-const MOCK_PARTY_SEEDS = [
-  {
-    name: "Rooftop Vibes 🌇",
-    dLat: 0.004,
-    dLng: 0.003,
-    memberOffsets: [
-      { dx: 0.00015, dy: 0.00020 },
-      { dx: -0.00020, dy: 0.00010 },
-      { dx: 0.00010, dy: -0.00015 },
-      { dx: -0.00008, dy: -0.00018 },
-      { dx: 0.00025, dy: 0.00005 },
-    ],
-  },
-  {
-    name: "Block Party 🎶",
-    dLat: -0.005,
-    dLng: -0.003,
-    memberOffsets: [
-      { dx: 0.00020, dy: 0.00010 },
-      { dx: -0.00015, dy: 0.00025 },
-      { dx: 0.00005, dy: -0.00020 },
-      { dx: -0.00022, dy: -0.00008 },
-      { dx: 0.00018, dy: 0.00022 },
-      { dx: -0.00010, dy: 0.00015 },
-      { dx: 0.00012, dy: -0.00025 },
-      { dx: -0.00025, dy: 0.00003 },
-    ],
-  },
-];
 
 const PARTY_COLORS = {
   fill: Colors.map.partyFill,
@@ -85,6 +52,8 @@ const PARTY_COLORS = {
 
 type MapFilterMode = "all" | "people" | "friends" | "dating";
 type MapPresenceMode = "online" | "friend" | "relationship";
+type FriendshipStatus = "none" | "pending" | "accepted" | "blocked";
+type FriendshipDirection = "incoming" | "outgoing";
 
 type MapUser = {
   lat: number;
@@ -94,29 +63,8 @@ type MapUser = {
   avatarUrl?: string;
   intent: "active" | "friend" | "relationship";
   isFriend?: boolean;
-};
-
-type MapMotion = {
-  speed: number;
-  heading: number | null;
-};
-
-type SimulatedMapAgent = {
-  id: string;
-  name: string;
-  isFriend: boolean;
-  intent: MapUser["intent"];
-  avatarUrl: string;
-  baseNorthM: number;
-  baseEastM: number;
-  orbitRadiusM: number;
-  phase: number;
-  angularSpeed: number;
-};
-
-type SimulatedMapSnapshot = {
-  users: MapUser[];
-  motion: Record<string, MapMotion>;
+  friendshipStatus?: FriendshipStatus;
+  requestDirection?: FriendshipDirection;
 };
 
 type LivePoiCategory = "transit" | "school" | "worship" | "food" | "shop" | "green";
@@ -148,88 +96,6 @@ type OverpassElement = {
   tags?: Record<string, string>;
 };
 
-function metersToLat(meters: number) {
-  return meters / 111_320;
-}
-
-function metersToLng(meters: number, atLat: number) {
-  const divisor = 111_320 * Math.max(0.2, Math.cos((atLat * Math.PI) / 180));
-  return meters / divisor;
-}
-
-function stableUnit(seed: number) {
-  const x = Math.sin(seed * 12.9898) * 43758.5453;
-  return x - Math.floor(x);
-}
-
-function buildSimulatedMapAgents(): SimulatedMapAgent[] {
-  if (!SIMULATION_ENABLED) return [];
-  const total = SIMULATION_FRIEND_COUNT + SIMULATION_LOCAL_COUNT;
-  return Array.from({ length: total }, (_, index) => {
-    const isFriend = index < SIMULATION_FRIEND_COUNT;
-    const localIndex = isFriend ? index : index - SIMULATION_FRIEND_COUNT;
-    const ring = isFriend ? Math.floor(index / 4) : Math.floor(localIndex / 10);
-    const countForRing = isFriend ? SIMULATION_FRIEND_COUNT : SIMULATION_LOCAL_COUNT;
-    const angle = (localIndex / countForRing) * Math.PI * 2 + ring * 0.61 + (isFriend ? 0.28 : 0);
-    const baseDistance = isFriend
-      ? 260 + ring * 140 + (index % 4) * 34
-      : 330 + ring * 210 + (localIndex % 6) * 48;
-    const intentSeed = stableUnit(index + 7);
-    const intent: MapUser["intent"] = isFriend
-      ? "active"
-      : intentSeed > 0.84
-        ? "relationship"
-        : intentSeed > 0.68
-          ? "friend"
-          : "active";
-
-    return {
-      id: isFriend ? `sim-friend-${index + 1}` : `sim-local-${localIndex + 1}`,
-      name: isFriend ? `Freund ${index + 1}` : `Local ${localIndex + 1}`,
-      isFriend,
-      intent,
-      avatarUrl: `https://api.dicebear.com/9.x/thumbs/png?seed=${isFriend ? "friend" : "local"}-${index + 1}`,
-      baseNorthM: Math.sin(angle) * baseDistance,
-      baseEastM: Math.cos(angle) * baseDistance,
-      orbitRadiusM: isFriend ? 10 + (index % 3) * 5 : 14 + (localIndex % 5) * 6,
-      phase: stableUnit(index + 17) * Math.PI * 2,
-      angularSpeed: (isFriend ? 0.012 : 0.018) + stableUnit(index + 29) * 0.012,
-    };
-  });
-}
-
-function getSimulatedMapSnapshot(
-  agents: SimulatedMapAgent[],
-  origin: { lat: number; lng: number } | null,
-): SimulatedMapSnapshot {
-  if (!origin || agents.length === 0) return { users: [], motion: {} };
-  const users: MapUser[] = [];
-  const motion: Record<string, MapMotion> = {};
-
-  agents.forEach((agent) => {
-    const theta = agent.phase;
-    const northM = agent.baseNorthM + Math.sin(theta) * agent.orbitRadiusM;
-    const eastM = agent.baseEastM + Math.cos(theta) * agent.orbitRadiusM;
-
-    users.push({
-      id: agent.id,
-      name: agent.name,
-      lat: origin.lat + metersToLat(northM),
-      lng: origin.lng + metersToLng(eastM, origin.lat),
-      avatarUrl: agent.avatarUrl,
-      intent: agent.intent,
-      isFriend: agent.isFriend,
-    });
-
-    motion[agent.id] = {
-      speed: 0,
-      heading: null,
-    };
-  });
-
-  return { users, motion };
-}
-
 function areMapUsersEqual(a: MapUser[], b: MapUser[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -241,6 +107,8 @@ function areMapUsersEqual(a: MapUser[], b: MapUser[]): boolean {
       x.intent !== y.intent ||
       x.avatarUrl !== y.avatarUrl ||
       x.isFriend !== y.isFriend ||
+      x.friendshipStatus !== y.friendshipStatus ||
+      x.requestDirection !== y.requestDirection ||
       Math.abs(x.lat - y.lat) > 0.000001 ||
       Math.abs(x.lng - y.lng) > 0.000001
     ) {
@@ -558,6 +426,11 @@ type FriendshipRow = {
   requester_id: string;
   addressee_id: string;
   status: "pending" | "accepted" | "blocked";
+};
+
+type FriendshipState = {
+  status: FriendshipStatus;
+  direction?: FriendshipDirection;
 };
 
 function PartyPopperIcon({ size = 20 }: { size?: number }) {
@@ -1840,7 +1713,7 @@ function buildMapHtml(
           e.preventDefault(); e.stopPropagation();
           var uid = t.getAttribute('data-user-id');
           var ud = (window._mapUsersById && window._mapUsersById[uid]) || {};
-          postNativeMessage({ type: 'user_detail', id: uid, name: ud.name || '', avatarUrl: ud.avatarUrl || '', isFriend: !!ud.isFriend, activity: ud.activity || '' });
+          postNativeMessage({ type: 'user_detail', id: uid, name: ud.name || '', avatarUrl: ud.avatarUrl || '', isFriend: !!ud.isFriend, activity: ud.activity || '', friendshipStatus: ud.friendshipStatus || 'none', requestDirection: ud.requestDirection || null });
           return;
         }
         t = t.parentNode;
@@ -2358,7 +2231,7 @@ function buildMapHtml(
           : u.intent === 'friend'
             ? 'Gerade auf Freundesuche'
             : 'Gerade online unterwegs';
-        window._mapUsersById[u.id] = { name: u.name || '', avatarUrl: avatarSrc, isFriend: isFriend, activity: activityText };
+        window._mapUsersById[u.id] = { name: u.name || '', avatarUrl: avatarSrc, isFriend: isFriend, activity: activityText, friendshipStatus: u.friendshipStatus || (isFriend ? 'accepted' : 'none'), requestDirection: u.requestDirection || null };
 
         if (useFigure) {
           seenFigureIds[u.id] = true;
@@ -2404,7 +2277,8 @@ function buildMapHtml(
             (function(uid) {
               pLink.addEventListener('click', function(e) {
                 e.stopPropagation();
-                postNativeMessage({type: 'user_detail', id: uid});
+                var ud = (window._mapUsersById && window._mapUsersById[uid]) || {};
+                postNativeMessage({type: 'user_detail', id: uid, name: ud.name || '', avatarUrl: ud.avatarUrl || '', isFriend: !!ud.isFriend, activity: ud.activity || '', friendshipStatus: ud.friendshipStatus || 'none', requestDirection: ud.requestDirection || null});
               });
             })(u.id);
             inlinePopup.appendChild(pLink);
@@ -2665,7 +2539,6 @@ export default function MapScreen() {
   const { user } = useAuth();
   const { homeLocation, currentLocationName, effectivePresenceMode } = useLocation();
   const {
-    posts,
     parties: storedParties,
     groups,
     createGroup,
@@ -2687,8 +2560,6 @@ export default function MapScreen() {
   const mySpeedRef = useRef<number>(0);
   const myHeadingRef = useRef<number | null>(null);
   const prevRadarIdsRef = useRef<Set<string>>(new Set());
-  const simulationAgents = useMemo(() => buildSimulatedMapAgents(), []);
-
   const injectRadar = useCallback(() => {
     if (!webViewRef.current) return;
     const radarLat = myLiveLocation?.lat ?? homeLocation?.lat;
@@ -2781,12 +2652,18 @@ export default function MapScreen() {
   const [presenceMenuOpen, setPresenceMenuOpen] = useState(false);
   const [activeUsers, setActiveUsers] = useState<MapUser[]>([]);
   const [livePois, setLivePois] = useState<LivePoi[]>([]);
-  const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
+  const [friendshipByUser, setFriendshipByUser] = useState<Record<string, FriendshipState>>({});
   const [isMapActive, setIsMapActive] = useState(false);
   const partyPanelAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<TextInput>(null);
   const [selectedMapUser, setSelectedMapUser] = useState<{
-    id: string; name: string; avatarUrl: string; isFriend: boolean; activity: string;
+    id: string;
+    name: string;
+    avatarUrl: string;
+    isFriend: boolean;
+    activity: string;
+    friendshipStatus: FriendshipStatus;
+    requestDirection?: FriendshipDirection;
   } | null>(null);
   const [userPanelDraft, setUserPanelDraft] = useState("");
   const [userMediaModalOpen, setUserMediaModalOpen] = useState(false);
@@ -2861,27 +2738,15 @@ export default function MapScreen() {
     }).start();
   }, [userPanelAnim, selectedMapUser]);
 
-  const allUsers = useMemo(() => {
-    const seen = new Set<string>();
-    const users: { id: string; name: string; avatar: string }[] = [];
-    posts.forEach((p) => {
-      if (!seen.has(p.user.id)) {
-        seen.add(p.user.id);
-        users.push({ id: p.user.id, name: p.user.name, avatar: p.user.avatar });
-      }
-    });
-    return users;
-  }, [posts]);
-
   const upsertOwnPresence = useCallback(async () => {
     if (!user) return;
-    if (!homeLocation) return;
+    if (!myLiveLocation) return;
 
     const shouldBeOnline = effectivePresenceMode === "online";
     const { error } = await supabase.from("map_presence").upsert({
       profile_id: user.id,
-      lat: homeLocation.lat,
-      lng: homeLocation.lng,
+      lat: myLiveLocation.lat,
+      lng: myLiveLocation.lon,
       mode: presenceMode,
       is_online: shouldBeOnline,
       last_seen_at: new Date().toISOString(),
@@ -2889,18 +2754,26 @@ export default function MapScreen() {
     if (error) {
       console.warn("map_presence upsert failed", error.message);
     }
-  }, [effectivePresenceMode, homeLocation, presenceMode, user]);
+  }, [effectivePresenceMode, myLiveLocation, presenceMode, user]);
+
+  const setOwnPresenceOffline = useCallback(async () => {
+    if (!user) return;
+    const { error } = await supabase
+      .from("map_presence")
+      .update({ is_online: false, last_seen_at: new Date().toISOString() })
+      .eq("profile_id", user.id);
+    if (error) console.warn("map_presence offline update failed", error.message);
+  }, [user]);
 
   const fetchFriendIds = useCallback(async () => {
     if (!user) {
-      setFriendIds(new Set());
+      setFriendshipByUser({});
       return;
     }
 
     const { data, error } = await supabase
       .from("friendships")
       .select("requester_id, addressee_id, status")
-      .eq("status", "accepted")
       .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`)
       .returns<FriendshipRow[]>();
 
@@ -2909,35 +2782,50 @@ export default function MapScreen() {
       return;
     }
 
-    const ids = new Set<string>();
+    const nextFriendshipByUser: Record<string, FriendshipState> = {};
     (data ?? []).forEach((row) => {
       const otherId = row.requester_id === user.id ? row.addressee_id : row.requester_id;
-      if (otherId && otherId !== user.id) ids.add(otherId);
+      if (!otherId || otherId === user.id) return;
+      nextFriendshipByUser[otherId] = {
+        status: row.status,
+        direction:
+          row.status === "pending"
+            ? row.requester_id === user.id
+              ? "outgoing"
+              : "incoming"
+          : undefined,
+      };
     });
-    setFriendIds((prev) => {
-      if (prev.size === ids.size) {
-        let same = true;
-        prev.forEach((id) => {
-          if (!ids.has(id)) same = false;
-        });
+    setFriendshipByUser((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(nextFriendshipByUser);
+      if (prevKeys.length === nextKeys.length) {
+        const same = nextKeys.every((id) =>
+          prev[id]?.status === nextFriendshipByUser[id]?.status &&
+          prev[id]?.direction === nextFriendshipByUser[id]?.direction,
+        );
         if (same) return prev;
       }
-      return ids;
+      return nextFriendshipByUser;
     });
   }, [user]);
 
   const fetchActiveUsers = useCallback(async () => {
-    if (!user || !homeLocation) {
+    const origin = myLiveLocation
+      ? { lat: myLiveLocation.lat, lng: myLiveLocation.lon }
+      : null;
+
+    if (!user || !origin) {
       setActiveUsers([]);
       return;
     }
 
     const now = Date.now();
     const staleBoundary = new Date(now - ONLINE_STALE_MINUTES * 60 * 1000).toISOString();
-    const latMin = homeLocation.lat - MAP_RADIUS_DEGREES;
-    const latMax = homeLocation.lat + MAP_RADIUS_DEGREES;
-    const lngMin = homeLocation.lng - MAP_RADIUS_DEGREES;
-    const lngMax = homeLocation.lng + MAP_RADIUS_DEGREES;
+    const latMin = origin.lat - MAP_RADIUS_DEGREES;
+    const latMax = origin.lat + MAP_RADIUS_DEGREES;
+    const lngMin = origin.lng - MAP_RADIUS_DEGREES;
+    const lngMax = origin.lng + MAP_RADIUS_DEGREES;
 
     const { data, error } = await supabase
       .from("map_presence")
@@ -2963,8 +2851,11 @@ export default function MapScreen() {
     (data ?? []).forEach((row) => {
       if (!row.is_online || row.lat == null || row.lng == null) return;
       if (row.profile_id === user.id) return;
+      const friendship = friendshipByUser[row.profile_id];
+      if (friendship?.status === "blocked") return;
 
       const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      const isFriend = friendship?.status === "accepted";
       mapped.push({
         id: row.profile_id,
         lat: row.lat,
@@ -2972,12 +2863,15 @@ export default function MapScreen() {
         name: profile?.display_name ?? "Local",
         avatarUrl: profile?.avatar_url ?? undefined,
         intent: row.mode === "online" ? "active" : row.mode ?? "active",
+        isFriend,
+        friendshipStatus: friendship?.status ?? "none",
+        requestDirection: friendship?.direction,
       });
     });
 
     mapped.sort((a, b) => a.id.localeCompare(b.id));
     setActiveUsers((prev) => (areMapUsersEqual(prev, mapped) ? prev : mapped));
-  }, [homeLocation, user]);
+  }, [friendshipByUser, myLiveLocation, user]);
 
   const fetchLivePois = useCallback(async () => {
     if (!homeLocation) {
@@ -3052,16 +2946,19 @@ out center tags ${LIVE_POI_LIMIT};`;
   }, [homeLocation]);
 
   useEffect(() => {
-    if (!user || !homeLocation || !isMapActive) return;
+    if (!user || !myLiveLocation || !isMapActive) return;
     void upsertOwnPresence();
     const interval = setInterval(() => {
       void upsertOwnPresence();
     }, PRESENCE_HEARTBEAT_MS);
-    return () => clearInterval(interval);
-  }, [homeLocation, isMapActive, upsertOwnPresence, user]);
+    return () => {
+      clearInterval(interval);
+      void setOwnPresenceOffline();
+    };
+  }, [isMapActive, myLiveLocation, setOwnPresenceOffline, upsertOwnPresence, user]);
 
   useEffect(() => {
-    if (!user || !homeLocation || !isMapActive) {
+    if (!user || !myLiveLocation || !isMapActive) {
       return;
     }
 
@@ -3072,10 +2969,29 @@ out center tags ${LIVE_POI_LIMIT};`;
     }, MAP_REFRESH_MS);
 
     return () => clearInterval(interval);
-  }, [fetchActiveUsers, homeLocation, isMapActive, user]);
+  }, [fetchActiveUsers, isMapActive, myLiveLocation, user]);
 
   useEffect(() => {
-    if (!user || !homeLocation || !isMapActive) {
+    if (!user || !isMapActive) return;
+    const channel = supabase
+      .channel(`map-presence-nearby-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "map_presence" },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as { profile_id?: string } | null;
+          if (!row?.profile_id || row.profile_id === user.id) return;
+          void fetchActiveUsers();
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchActiveUsers, isMapActive, user]);
+
+  useEffect(() => {
+    if (!user || !isMapActive) {
       return;
     }
 
@@ -3085,7 +3001,19 @@ out center tags ${LIVE_POI_LIMIT};`;
     }, FRIEND_REFRESH_MS);
 
     return () => clearInterval(interval);
-  }, [fetchFriendIds, homeLocation, isMapActive, user]);
+  }, [fetchFriendIds, isMapActive, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        if (isMapActive && myLiveLocation) void upsertOwnPresence();
+      } else {
+        void setOwnPresenceOffline();
+      }
+    });
+    return () => sub.remove();
+  }, [isMapActive, myLiveLocation, setOwnPresenceOffline, upsertOwnPresence, user]);
 
   useEffect(() => {
     if (!homeLocation || !isMapActive || filterMode === "people") {
@@ -3108,28 +3036,8 @@ out center tags ${LIVE_POI_LIMIT};`;
     return () => clearInterval(interval);
   }, [injectTimeOfDay, isMapActive]);
 
-  // Combine mock seed parties + user-created parties
   const allParties = useMemo(() => {
-    if (!homeLocation) return [];
-
-    const mockParties = MOCK_PARTY_SEEDS.map((seed, si) => ({
-      id: `mock-party-${si}`,
-      name: seed.name,
-      lat: homeLocation.lat + seed.dLat,
-      lng: homeLocation.lng + seed.dLng,
-      hostName: allUsers[si % Math.max(allUsers.length, 1)]?.name ?? "Unbekannt",
-      members: seed.memberOffsets.map((off, mi) => {
-        const u = allUsers[(si * 3 + mi) % Math.max(allUsers.length, 1)];
-        return {
-          id: u?.id ?? `pm-${si}-${mi}`,
-          name: u?.name ?? `Gast ${mi + 1}`,
-          lat: homeLocation.lat + seed.dLat + off.dx,
-          lng: homeLocation.lng + seed.dLng + off.dy,
-        };
-      }),
-    }));
-
-    const userParties = storedParties.map((p) => ({
+    return storedParties.map((p) => ({
       id: p.id,
       name: p.name,
       lat: p.lat,
@@ -3137,29 +3045,11 @@ out center tags ${LIVE_POI_LIMIT};`;
       hostName: p.hostName,
       members: p.members,
     }));
-
-    return [...mockParties, ...userParties];
-  }, [homeLocation, allUsers, storedParties]);
-
-  const simulationOrigin = useMemo(() => {
-    if (!homeLocation) return null;
-    return {
-      lat: homeLocation.lat,
-      lng: homeLocation.lng,
-    };
-  }, [homeLocation]);
-
-  const simulatedSnapshot = useMemo(
-    () => getSimulatedMapSnapshot(simulationAgents, simulationOrigin),
-    [simulationAgents, simulationOrigin],
-  );
+  }, [storedParties]);
 
   const mapUsers = useMemo(
-    () => [
-      ...activeUsers.map((user) => ({ ...user, isFriend: friendIds.has(user.id) })),
-      ...simulatedSnapshot.users,
-    ],
-    [activeUsers, friendIds, simulatedSnapshot.users],
+    () => activeUsers,
+    [activeUsers],
   );
 
   const visibleUsers = useMemo(() => {
@@ -3262,16 +3152,16 @@ out center tags ${LIVE_POI_LIMIT};`;
     if (!webViewRef.current) return;
     const radarOriginLat = myLiveLocation?.lat ?? homeLocation?.lat;
     const radarOriginLng = myLiveLocation?.lon ?? homeLocation?.lng;
-    const ownPosition = homeLocation ? { lat: homeLocation.lat, lng: homeLocation.lng } : null;
+    const ownPosition = myLiveLocation ? { lat: myLiveLocation.lat, lng: myLiveLocation.lon } : null;
     const sizingData = {
       lat: radarOriginLat,
       lng: radarOriginLng,
       radiusM: radarSettings.radiusM,
       enabled: radarSettings.enabled && radarOriginLat != null && radarOriginLng != null,
     };
-    const script = `(function(){if(window.updateMapData)window.updateMapData(${JSON.stringify(visibleUsers)},${JSON.stringify(livePois)},${JSON.stringify(allParties)},${JSON.stringify(filterMode)},${JSON.stringify(presenceMode)},${JSON.stringify(simulatedSnapshot.motion)},${JSON.stringify(sizingData)},${JSON.stringify(ownPosition)});})();true;`;
+    const script = `(function(){if(window.updateMapData)window.updateMapData(${JSON.stringify(visibleUsers)},${JSON.stringify(livePois)},${JSON.stringify(allParties)},${JSON.stringify(filterMode)},${JSON.stringify(presenceMode)},${JSON.stringify({})},${JSON.stringify(sizingData)},${JSON.stringify(ownPosition)});})();true;`;
     webViewRef.current.injectJavaScript(script);
-  }, [visibleUsers, livePois, allParties, filterMode, presenceMode, simulatedSnapshot.motion, myLiveLocation, homeLocation, radarSettings.enabled, radarSettings.radiusM]);
+  }, [visibleUsers, livePois, allParties, filterMode, presenceMode, myLiveLocation, homeLocation, radarSettings.enabled, radarSettings.radiusM]);
 
   useEffect(() => {
     injectMapDataRef.current = injectMapData;
@@ -3282,7 +3172,15 @@ out center tags ${LIVE_POI_LIMIT};`;
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === "user_detail" && data.id) {
-        setSelectedMapUser({ id: data.id, name: data.name ?? "", avatarUrl: data.avatarUrl ?? "", isFriend: !!data.isFriend, activity: data.activity ?? "" });
+        setSelectedMapUser({
+          id: data.id,
+          name: data.name ?? "",
+          avatarUrl: data.avatarUrl ?? "",
+          isFriend: !!data.isFriend,
+          activity: data.activity ?? "",
+          friendshipStatus: data.friendshipStatus ?? (data.isFriend ? "accepted" : "none"),
+          requestDirection: data.requestDirection ?? undefined,
+        });
         setUserPanelDraft("");
         return;
       }
@@ -3352,7 +3250,7 @@ out center tags ${LIVE_POI_LIMIT};`;
         radiusM: radarSettings.radiusM,
         enabled: radarSettings.enabled,
       };
-      const ownPosition = { lat: homeLocation.lat, lng: homeLocation.lng };
+      const ownPosition = myLiveLocation ? { lat: myLiveLocation.lat, lng: myLiveLocation.lon } : null;
       webViewRef.current.injectJavaScript(
         `(function(){
           if(window.updateMapData) window.updateMapData(
@@ -3361,7 +3259,7 @@ out center tags ${LIVE_POI_LIMIT};`;
             ${JSON.stringify(updatedParties)},
             ${JSON.stringify(filterMode)},
             ${JSON.stringify(presenceMode)},
-            ${JSON.stringify(simulatedSnapshot.motion)},
+            ${JSON.stringify({})},
             ${JSON.stringify(sizingData)},
             ${JSON.stringify(ownPosition)}
           );
@@ -3377,7 +3275,7 @@ out center tags ${LIVE_POI_LIMIT};`;
     setCreateComposerMode(null);
     setShowPartyComposer(false);
   }, [effectivePresenceMode, homeLocation, partyName, partyAddress, selectedPartyMembers, createParty,
-      currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode, simulatedSnapshot.motion, myLiveLocation, radarSettings.enabled, radarSettings.radiusM]);
+      currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode, myLiveLocation, radarSettings.enabled, radarSettings.radiusM]);
 
   const handleCreateGroup = useCallback(() => {
     if (effectivePresenceMode === "home") {
@@ -3437,18 +3335,22 @@ out center tags ${LIVE_POI_LIMIT};`;
 
   const handleSendUserMessage = useCallback(() => {
     if (!userPanelDraft.trim() || !selectedMapUser) return;
+    if (!selectedMapUser.isFriend) {
+      Alert.alert("Noch keine Freunde", "Du kannst schreiben, sobald die Freundschaftsanfrage angenommen wurde.");
+      return;
+    }
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const now = new Date();
     const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
     addLocalMessage(selectedMapUser.id, {
       id: `map-msg-${Date.now()}`,
-      senderId: "me",
+      senderId: currentUser.id,
       text: userPanelDraft.trim(),
       time,
     });
     setUserPanelDraft("");
     setSelectedMapUser(null);
-  }, [selectedMapUser, userPanelDraft, addLocalMessage]);
+  }, [currentUser.id, selectedMapUser, userPanelDraft, addLocalMessage]);
 
   const handleDeleteParty = useCallback(() => {
     if (!myParty) return;
@@ -3488,12 +3390,70 @@ out center tags ${LIVE_POI_LIMIT};`;
     updatePartyMembers(myParty.id, myParty.members.filter((m) => m.id !== memberId));
   }, [myParty, updatePartyMembers]);
 
-  const handleSendFriendRequest = useCallback(() => {
-    if (!selectedMapUser) return;
+  const handleSendFriendRequest = useCallback(async () => {
+    if (!selectedMapUser || !user) return;
+    if (selectedMapUser.friendshipStatus === "pending") return;
+
+    const { error } = await supabase.from("friendships").insert({
+      requester_id: user.id,
+      addressee_id: selectedMapUser.id,
+      status: "pending",
+    });
+
+    if (error) {
+      Alert.alert("Anfrage nicht gesendet", error.message);
+      return;
+    }
+
     if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert("Anfrage gesendet ✓", `Du hast ${selectedMapUser.name} eine Freundschaftsanfrage geschickt.`);
-    setSelectedMapUser(null);
-  }, [selectedMapUser]);
+    setFriendshipByUser((prev) => ({
+      ...prev,
+      [selectedMapUser.id]: { status: "pending", direction: "outgoing" },
+    }));
+    setActiveUsers((prev) =>
+      prev.map((mapUser) =>
+        mapUser.id === selectedMapUser.id
+          ? { ...mapUser, friendshipStatus: "pending", requestDirection: "outgoing" }
+          : mapUser,
+      ),
+    );
+    setSelectedMapUser((prev) =>
+      prev ? { ...prev, friendshipStatus: "pending", requestDirection: "outgoing" } : prev,
+    );
+    Alert.alert("Anfrage gesendet", `Du hast ${selectedMapUser.name} eine Freundschaftsanfrage geschickt.`);
+  }, [selectedMapUser, user]);
+
+  const handleAcceptFriendRequest = useCallback(async () => {
+    if (!selectedMapUser || !user) return;
+
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted", accepted_at: new Date().toISOString() })
+      .eq("requester_id", selectedMapUser.id)
+      .eq("addressee_id", user.id);
+
+    if (error) {
+      Alert.alert("Anfrage nicht angenommen", error.message);
+      return;
+    }
+
+    if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setFriendshipByUser((prev) => ({
+      ...prev,
+      [selectedMapUser.id]: { status: "accepted" },
+    }));
+    setActiveUsers((prev) =>
+      prev.map((mapUser) =>
+        mapUser.id === selectedMapUser.id
+          ? { ...mapUser, isFriend: true, friendshipStatus: "accepted", requestDirection: undefined }
+          : mapUser,
+      ),
+    );
+    setSelectedMapUser((prev) =>
+      prev ? { ...prev, isFriend: true, friendshipStatus: "accepted", requestDirection: undefined } : prev,
+    );
+    Alert.alert("Jetzt Freunde", `${selectedMapUser.name} ist jetzt in deiner Freundesliste.`);
+  }, [selectedMapUser, user]);
 
   const handleUserPickImage = useCallback(async () => {
     setUserMediaModalOpen(false);
@@ -4222,7 +4182,13 @@ out center tags ${LIVE_POI_LIMIT};`;
               <View style={styles.userDetailHeaderText}>
                 <Text style={styles.userDetailName} numberOfLines={1}>{selectedMapUser.name}</Text>
                 <Text style={styles.userDetailSubtitle} numberOfLines={1}>
-                  {selectedMapUser.isFriend ? "Freund" : "Unbekannt"}
+                  {selectedMapUser.isFriend
+                    ? "Freund"
+                    : selectedMapUser.friendshipStatus === "pending" && selectedMapUser.requestDirection === "outgoing"
+                      ? "Anfrage gesendet"
+                      : selectedMapUser.friendshipStatus === "pending" && selectedMapUser.requestDirection === "incoming"
+                        ? "Anfrage erhalten"
+                        : "Local in der Nähe"}
                 </Text>
               </View>
               <Pressable style={styles.userDetailCloseBtn} onPress={() => setSelectedMapUser(null)}>
@@ -4241,6 +4207,16 @@ out center tags ${LIVE_POI_LIMIT};`;
                     <Text style={styles.userActivityCardLabel}>Was er/sie macht</Text>
                     <Text style={styles.userActivityCardText}>{selectedMapUser.activity}</Text>
                   </View>
+                ) : selectedMapUser.friendshipStatus === "pending" && selectedMapUser.requestDirection === "outgoing" ? (
+                  <View style={styles.userActivityCard}>
+                    <Text style={styles.userActivityCardLabel}>Freundschaft</Text>
+                    <Text style={styles.userActivityCardText}>Deine Anfrage wartet auf Annahme.</Text>
+                  </View>
+                ) : selectedMapUser.friendshipStatus === "pending" && selectedMapUser.requestDirection === "incoming" ? (
+                  <Pressable style={styles.friendRequestBtn} onPress={handleAcceptFriendRequest}>
+                    <Feather name="user-check" size={15} color="#fff" />
+                    <Text style={styles.friendRequestBtnText}>Anfrage annehmen</Text>
+                  </Pressable>
                 ) : (
                   <Pressable style={styles.friendRequestBtn} onPress={handleSendFriendRequest}>
                     <Feather name="user-plus" size={15} color="#fff" />
@@ -4248,33 +4224,39 @@ out center tags ${LIVE_POI_LIMIT};`;
                   </Pressable>
                 )}
 
-                <TextInput
-                  ref={userPanelInputRef}
-                  style={styles.userMessageInput}
-                  value={userPanelDraft}
-                  onChangeText={setUserPanelDraft}
-                  placeholder="Nachricht schreiben..."
-                  placeholderTextColor={Colors.light.textTertiary}
-                  multiline
-                  returnKeyType="default"
-                  blurOnSubmit={false}
-                />
+                {selectedMapUser.isFriend ? (
+                  <>
+                    <TextInput
+                      ref={userPanelInputRef}
+                      style={styles.userMessageInput}
+                      value={userPanelDraft}
+                      onChangeText={setUserPanelDraft}
+                      placeholder="Nachricht schreiben..."
+                      placeholderTextColor={Colors.light.textTertiary}
+                      multiline
+                      returnKeyType="default"
+                      blurOnSubmit={false}
+                    />
 
-                <View style={styles.userActionRow}>
-                  {selectedMapUser.isFriend && (
-                    <Pressable style={styles.userMediaBtn} onPress={() => setUserMediaModalOpen(true)}>
-                      <Feather name="image" size={18} color={Colors.light.tintBlue} />
-                    </Pressable>
-                  )}
-                  <Pressable
-                    style={[styles.userSendBtn, !userPanelDraft.trim() && styles.userSendBtnDisabled]}
-                    onPress={handleSendUserMessage}
-                    disabled={!userPanelDraft.trim()}
-                  >
-                    <Feather name="send" size={14} color="#fff" />
-                    <Text style={styles.userSendBtnText}>Senden</Text>
-                  </Pressable>
-                </View>
+                    <View style={styles.userActionRow}>
+                      <Pressable style={styles.userMediaBtn} onPress={() => setUserMediaModalOpen(true)}>
+                        <Feather name="image" size={18} color={Colors.light.tintBlue} />
+                      </Pressable>
+                      <Pressable
+                        style={[styles.userSendBtn, !userPanelDraft.trim() && styles.userSendBtnDisabled]}
+                        onPress={handleSendUserMessage}
+                        disabled={!userPanelDraft.trim()}
+                      >
+                        <Feather name="send" size={14} color="#fff" />
+                        <Text style={styles.userSendBtnText}>Senden</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : (
+                  <Text style={styles.userFriendHint}>
+                    Nachrichten sind verfügbar, sobald ihr befreundet seid.
+                  </Text>
+                )}
               </ScrollView>
             </Animated.View>
           </>
@@ -4982,6 +4964,12 @@ const styles = StyleSheet.create({
     borderColor: mapPanelBorder,
   },
   friendRequestBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  userFriendHint: {
+    paddingHorizontal: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: Colors.light.textSecondary,
+  },
   userMessageInput: {
     minHeight: 72, maxHeight: 110,
     borderRadius: Colors.shape.radiusSm,

@@ -20,7 +20,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
-import { ChatMessage, Group, Party, User, useApp } from "@/context/AppContext";
+import { ChatMessage, Group, Party, useApp } from "@/context/AppContext";
 
 const TAB_BAR_H = 84;
 const EMOJI_PANEL_H = 280;
@@ -39,10 +39,19 @@ const EMOJI_CATEGORIES = [
 ];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type ChatContact = User & { status: string; messages: ChatMessage[] };
+type ProfileChatThread = {
+  type: "profile";
+  id: string;
+  name: string;
+  subtitle: string;
+  avatar: string;
+  messages: ChatMessage[];
+  username: string;
+  status: string;
+};
 
 type ChatThread =
-  | { type: "profile"; id: string; name: string; subtitle: string; avatar: string; messages: ChatMessage[]; username: string; status: string }
+  | ProfileChatThread
   | { type: "party";   id: string; name: string; subtitle: string; icon: string;   messages: ChatMessage[]; party: Party }
   | { type: "group";   id: string; name: string; subtitle: string; icon: string;   messages: ChatMessage[]; group: Group };
 
@@ -50,65 +59,19 @@ type MsgReaction = { emoji: string; count: number; mine: boolean };
 type ReplyTarget = { id: string; text: string; senderName: string };
 type ExtMsg = ChatMessage & { replyTo?: ReplyTarget };
 
-// ── Demo data ─────────────────────────────────────────────────────────────────
-const DEMO_PARTY: Party = {
-  id: "demo-party-griesle", name: "Party im Griesle",
-  lat: 37.787, lng: -122.407, hostId: "maya", hostName: "Maya",
-  members: [
-    { id: "luca",  name: "Luca",  lat: 37.7871, lng: -122.4071 },
-    { id: "priya", name: "Priya", lat: 37.7869, lng: -122.4072 },
-    { id: "sam",   name: "Sam",   lat: 37.7872, lng: -122.4069 },
-  ],
-  createdAt: new Date().toISOString(),
-};
-
-const FALLBACK_CONTACTS: ChatContact[] = [
-  { id:"maya",  name:"Maya",  username:"maya",  avatar:"https://i.pravatar.cc/150?img=47", bio:"Coffee lover",  location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Sucht Kaffee in der Nähe",   messages:[{ id:"maya-1",  senderId:"maya",  text:"Hey, bist du später noch in der Gegend?", time:"12:34" },{ id:"maya-2",  senderId:"me", text:"Ja, wahrscheinlich beim Park. Was geht?", time:"12:36" },{ id:"maya-3",  senderId:"maya",  text:"Ich wollte gleich einen kleinen Spaziergang machen.", time:"12:39" }] },
-  { id:"luca",  name:"Luca",  username:"luca",  avatar:"https://i.pravatar.cc/150?img=12", bio:"Street photos", location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Fotografiert gerade draußen", messages:[{ id:"luca-1",  senderId:"luca",  text:"Der Sonnenuntergang sieht heute wild aus.", time:"18:08" },{ id:"luca-2",  senderId:"me", text:"Schick mal den Spot.", time:"18:10" },{ id:"luca-3",  senderId:"luca",  text:"Bin beim kleinen Platz neben der Haltestelle.", time:"18:11" }] },
-  { id:"priya", name:"Priya", username:"priya", avatar:"https://i.pravatar.cc/150?img=25", bio:"Food finds",    location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Hat einen neuen Food-Spot",    messages:[{ id:"priya-1", senderId:"priya", text:"Ich glaube, ich habe das beste Sandwich hier gefunden.", time:"14:02" },{ id:"priya-2", senderId:"me", text:"Das ist eine große Behauptung.", time:"14:03" },{ id:"priya-3", senderId:"priya", text:"Dann musst du testen kommen.", time:"14:04" }] },
-  { id:"sam",   name:"Sam",   username:"sam",   avatar:"https://i.pravatar.cc/150?img=33", bio:"Dog walks",     location:"Nearby", followersCount:0, followingCount:0, postsCount:0, status:"Mit Biscuit unterwegs",       messages:[{ id:"sam-1",   senderId:"sam",   text:"Biscuit will neue Menschen kennenlernen.", time:"09:18" },{ id:"sam-2",   senderId:"me", text:"Das klingt nach einem guten Plan.", time:"09:20" },{ id:"sam-3",   senderId:"sam",   text:"Wir laufen gleich Richtung Park.", time:"09:21" }] },
-];
-
-function toChatContacts(users: User[], meId: string): ChatContact[] {
-  const seen = new Set<string>();
-  const cs = users
-    .filter((u) => u.id !== meId)
-    .filter((u) => { if (seen.has(u.id)) return false; seen.add(u.id); return true; })
-    .slice(0, 8)
-    .map((u, i) => ({
-      ...u,
-      status: ["Online in deiner Nähe","Gerade aktiv","Offen für Pläne","In der Umgebung"][i % 4],
-      messages: [
-        { id:`${u.id}-1`, senderId:u.id,  text:`Hey, ich bin gerade bei ${u.location || "dir in der Nähe"}.`, time:"Jetzt" },
-        { id:`${u.id}-2`, senderId:meId,  text:"Cool, was machst du gerade?", time:"Jetzt" },
-        { id:`${u.id}-3`, senderId:u.id,  text:"Noch nichts Festes. Vielleicht ergibt sich etwas.", time:"Jetzt" },
-      ],
-    }));
-  return cs.length ? cs : FALLBACK_CONTACTS;
-}
-
-function toPartyThreads(parties: Party[], meId: string): ChatThread[] {
-  const list = parties.length ? parties : [DEMO_PARTY];
-  return list.map((p) => ({
+function toPartyThreads(parties: Party[]): ChatThread[] {
+  return parties.map((p) => ({
     type: "party" as const, id: `party:${p.id}`, name: p.name,
     subtitle: `${p.members.length} Mitglieder · ${p.hostName}`, icon: "🎉", party: p,
-    messages: [
-      { id:`${p.id}-p1`, senderId:p.hostId,              text:`${p.hostName} hat die Party gestartet.`, time:"Jetzt" },
-      { id:`${p.id}-p2`, senderId:p.members[0]?.id??p.hostId, text:p.members[0]?`${p.members[0].name} ist dabei.`:"Wer ist dabei?", time:"Jetzt" },
-      { id:`${p.id}-p3`, senderId:meId,                  text:p.members[1]?`Ich sehe ${p.members[1].name} auch auf der Karte.`:"Ich komme gleich.", time:"Jetzt" },
-    ],
+    messages: [],
   }));
 }
 
-function toGroupThreads(groups: Group[], meId: string): ChatThread[] {
+function toGroupThreads(groups: Group[]): ChatThread[] {
   return groups.map((g) => ({
     type: "group" as const, id: `group:${g.id}`, name: g.name,
     subtitle: `${g.members.length} Mitglieder · ${g.ownerName}`, icon: "👥", group: g,
-    messages: [
-      { id:`${g.id}-g1`, senderId:g.ownerId,              text:`${g.ownerName} hat die Gruppe erstellt.`, time:"Jetzt" },
-      { id:`${g.id}-g2`, senderId:g.members[0]?.id??g.ownerId, text:g.members[0]?`${g.members[0].name} ist dabei.`:"Wer ist dabei?", time:"Jetzt" },
-      { id:`${g.id}-g3`, senderId:meId,                   text:g.members[1]?`${g.members[1].name} ist auch eingeladen.`:"Ich bin dabei.", time:"Jetzt" },
-    ],
+    messages: [],
   }));
 }
 
@@ -347,7 +310,7 @@ function MessageRow({ message, mine, isGroup, senderName, reactions, isStarred, 
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const { currentUser, posts, parties, groups, mapFriends, localMessages, addLocalMessage, markThreadRead } = useApp();
+  const { currentUser, parties, groups, acceptedFriends, mapFriends, localMessages, addLocalMessage, markThreadRead } = useApp();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
@@ -371,18 +334,26 @@ export default function HomeScreen() {
   const inputRef  = useRef<TextInput>(null);
 
   // Build threads
-  const contacts = useMemo(() => toChatContacts(posts.map((p) => p.user), currentUser.id), [currentUser.id, posts]);
-  const partyThreads  = useMemo(() => toPartyThreads(parties, currentUser.id), [currentUser.id, parties]);
-  const groupThreads  = useMemo(() => toGroupThreads(groups, currentUser.id), [currentUser.id, groups]);
-  const profileThreads = useMemo<ChatThread[]>(
-    () => contacts.map((c) => ({ type:"profile", id:c.id, name:c.name, subtitle:c.status, avatar:c.avatar, messages:c.messages, username:c.username, status:c.status })),
-    [contacts],
+  const partyThreads  = useMemo(() => toPartyThreads(parties), [parties]);
+  const groupThreads  = useMemo(() => toGroupThreads(groups), [groups]);
+  const profileThreads = useMemo<ProfileChatThread[]>(
+    () => acceptedFriends.map((friend) => ({
+      type: "profile" as const,
+      id: friend.id,
+      name: friend.name,
+      subtitle: friend.location || "Freund",
+      avatar: friend.avatar,
+      username: friend.username,
+      status: friend.location || "Freund",
+      messages: [],
+    })),
+    [acceptedFriends],
   );
   const mapFriendThreads = useMemo<ChatThread[]>(
     () => mapFriends.map((f) => ({
       type:"profile" as const, id:f.id, name:f.name, subtitle:f.activity,
       avatar:f.avatarUrl, username:f.id, status:f.activity,
-      messages:[{ id:`${f.id}-map-1`, senderId:f.id, text:f.activity, time:"Jetzt" }],
+      messages:[],
     })),
     [mapFriends],
   );
@@ -400,7 +371,7 @@ export default function HomeScreen() {
     setUnreadCounts((prev) => {
       const next = { ...prev };
       threads.forEach((t, i) => {
-        if (!(t.id in next)) next[t.id] = i < 4 ? Math.floor(Math.random() * 6) + 1 : 0;
+        if (!(t.id in next)) next[t.id] = 0;
       });
       return next;
     });
@@ -546,9 +517,9 @@ export default function HomeScreen() {
 
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return contacts;
-    return contacts.filter((c) => `${c.name} ${c.username} ${c.status}`.toLowerCase().includes(q));
-  }, [contacts, searchQuery]);
+    if (!q) return profileThreads;
+    return profileThreads.filter((c) => `${c.name} ${c.username} ${c.status}`.toLowerCase().includes(q));
+  }, [profileThreads, searchQuery]);
 
   // ── Render: Conversation List ────────────────────────────────────────────────
   const renderList = () => (
@@ -558,10 +529,10 @@ export default function HomeScreen() {
         <Text style={st.listTitle}>Nachrichten</Text>
         <View style={{ flexDirection:"row", gap:8 }}>
           <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => router.push("/presence-choice")}>
-            <Feather name="home" size={21} color={Colors.light.onBright} />
+            <Feather name="home" size={21} color={Colors.light.text} />
           </Pressable>
           <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.7 : 1 }]} onPress={() => { setSearchOpen(true); setEmojiOpen(false); }}>
-            <Feather name="search" size={20} color={Colors.light.onBright} />
+            <Feather name="search" size={20} color={Colors.light.text} />
           </Pressable>
         </View>
       </View>
@@ -827,7 +798,7 @@ export default function HomeScreen() {
             <View style={st.searchPanelHeader}>
               <Text style={st.searchTitle}>Profile suchen</Text>
               <Pressable style={({ pressed }) => [st.hBtn, { opacity: pressed ? 0.72 : 1 }]} onPress={() => { setSearchOpen(false); setSearchQuery(""); }}>
-                <Feather name="x" size={20} color={Colors.light.onBright} />
+                <Feather name="x" size={20} color={Colors.light.text} />
               </Pressable>
             </View>
             <View style={st.searchInputWrap}>

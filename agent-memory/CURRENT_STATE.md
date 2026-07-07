@@ -115,20 +115,21 @@ pnpm exec expo start --dev-client --host localhost
 <!-- APP_SYNC_STATUS_START -->
 ## Letzter Sync
 
-- Timestamp UTC: 20260628T063348Z
+- Timestamp UTC: 20260707T021639Z
 - Projekt: Local-Connect
 - Branch: master
-- Commit vor Sync: e8e766b
-- Lokale Änderungen vor Memory-Update: 6
-- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260628T063348Z
+- Commit vor Sync: b04f6fc
+- Lokale Änderungen vor Memory-Update: 7
+- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260707T021639Z
 - Hinweis: Dieser Block wird automatisch von /sync aktualisiert.
 
 ### Geänderte Dateien vor Sync
 
-- ` M agent-memory/CLAUDE_MEMORY.md`
-- ` M agent-memory/CODEX_HANDOFF.md`
-- ` M agent-memory/CURRENT_STATE.md`
+- ` M artifacts/mobile/app/(tabs)/index.tsx`
+- ` M artifacts/mobile/app/(tabs)/map.tsx`
 - ` M artifacts/mobile/app/(tabs)/simulation-lab.tsx`
-- ` M artifacts/mobile/features/sim-map/docs/implementation-plan.md`
-- ` M artifacts/mobile/features/sim-map/engine/types.ts`
+- ` M artifacts/mobile/components/RadarOverlay.tsx`
+- ` M artifacts/mobile/context/AppContext.tsx`
+- ` M artifacts/mobile/context/ProximityContext.tsx`
+- `?? supabase/migrations/20260707012000_profile_direct_messages.sql`
 <!-- APP_SYNC_STATUS_END -->

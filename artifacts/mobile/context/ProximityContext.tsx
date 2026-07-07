@@ -83,6 +83,7 @@ export function ProximityProvider({ children }: { children: React.ReactNode }) {
   const notifiedUntil  = useRef<Map<string, number>>(new Map()); // entityId → cooldownTimestamp
   const locationSub    = useRef<Location.LocationSubscription | null>(null);
   const realtimeSubs   = useRef<ReturnType<typeof supabase.channel>[]>([]);
+  const subscribedGeohash = useRef<string | null>(null);
   const appState       = useRef<AppStateStatus>(AppState.currentState);
   const isMounted      = useRef(true);
 
@@ -171,6 +172,9 @@ export function ProximityProvider({ children }: { children: React.ReactNode }) {
 
   // ─── Realtime-Subscriptions (Phase 5 – geohash-basiert) ──────────────────
   const subscribeRealtime = useCallback((myHash: string) => {
+    if (subscribedGeohash.current === myHash && realtimeSubs.current.length > 0) return;
+    subscribedGeohash.current = myHash;
+
     // Alte Subscriptions entfernen
     for (const ch of realtimeSubs.current) {
       supabase.removeChannel(ch);
@@ -245,6 +249,7 @@ export function ProximityProvider({ children }: { children: React.ReactNode }) {
       await supabase.removeChannel(ch);
     }
     realtimeSubs.current = [];
+    subscribedGeohash.current = null;
 
     const uid = userRef.current?.id;
     if (uid) await removeMyLocation(uid);
@@ -268,14 +273,13 @@ export function ProximityProvider({ children }: { children: React.ReactNode }) {
 
       if (wasBackground && next === 'active') {
         await startWatching();
-      } else if (next === 'background') {
-        locationSub.current?.remove();
-        locationSub.current = null;
+      } else if (next === 'background' || next === 'inactive') {
+        await stopWatching();
       }
       appState.current = next;
     });
     return () => sub.remove();
-  }, [startWatching]);
+  }, [startWatching, stopWatching]);
 
   // ─── Start bei Login / Stop bei Logout ────────────────────────────────────
   useEffect(() => {

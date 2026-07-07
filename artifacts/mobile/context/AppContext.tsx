@@ -7,7 +7,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { AppState } from "react-native";
+import { AppState, type AppStateStatus } from "react-native";
 
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -312,6 +312,7 @@ type AppContextType = {
   comments: Comment[];
   parties: Party[];
   groups: Group[];
+  acceptedFriends: User[];
   mapFriends: MapFriend[];
   setMapFriends: (friends: MapFriend[]) => void;
   localMessages: Record<string, ChatMessage[]>;
@@ -403,7 +404,7 @@ type PartyMemberRow = {
 
 type ChatMessageRow = {
   id: string;
-  thread_type: "group" | "party";
+  thread_type: "profile" | "group" | "party";
   thread_id: string;
   sender_id: string;
   text: string;
@@ -413,6 +414,11 @@ type ChatMessageRow = {
   status?: ChatMessageStatus | null;
   delivered_at?: string | null;
   read_at?: string | null;
+};
+
+type FriendshipRow = {
+  requester_id: string;
+  addressee_id: string;
 };
 
 type SupabaseErrorLike = {
@@ -547,6 +553,14 @@ function areUsersEqual(a: User, b: User): boolean {
   );
 }
 
+function areUsersListEqual(a: User[], b: User[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (!areUsersEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
+
 function arePostsEqual(a: Post[], b: Post[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -579,8 +593,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [parties, setParties] = useState<Party[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [currentUser, setCurrentUser] = useState<User>(ME);
+  const [acceptedFriends, setAcceptedFriends] = useState<User[]>([]);
   const [mapFriends, setMapFriends] = useState<MapFriend[]>([]);
   const [localMessages, setLocalMessages] = useState<Record<string, ChatMessage[]>>({});
+  const [isAppActive, setIsAppActive] = useState(AppState.currentState === "active");
   const [hydrated, setHydrated] = useState(false);
 
   const mergeThreadMessages = useCallback((threadId: string, messages: ChatMessage[]) => {
@@ -650,8 +666,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       [threadId]: dedupeMessages([...(prev[threadId] ?? []), optimisticMessage]),
     }));
     if (!user) return;
-    const [threadType, rawThreadId] = threadId.split(":");
-    if ((threadType !== "group" && threadType !== "party") || !isUuid(rawThreadId)) {
+    const hasExplicitThreadType = threadId.includes(":");
+    const [parsedThreadType, parsedThreadId] = hasExplicitThreadType ? threadId.split(":") : ["profile", threadId];
+    const threadType = parsedThreadType as "profile" | "group" | "party";
+    const rawThreadId = parsedThreadId;
+    if ((threadType !== "profile" && threadType !== "group" && threadType !== "party") || !isUuid(rawThreadId)) {
       updateMessageStatus(threadId, clientMessageId, { status: "sent" });
       return;
     }
@@ -918,6 +937,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const threadFilters = [
       ...groupIds.map((id) => `and(thread_type.eq.group,thread_id.eq.${id})`),
       ...partyIds.map((id) => `and(thread_type.eq.party,thread_id.eq.${id})`),
+      `and(thread_type.eq.profile,sender_id.eq.${user.id})`,
+      `and(thread_type.eq.profile,thread_id.eq.${user.id})`,
     ];
     if (threadFilters.length) {
       let messageRows: ChatMessageRow[] | null = null;
@@ -947,7 +968,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       const nextMessages: Record<string, ChatMessage[]> = {};
       (messageRows ?? []).forEach((message) => {
-        const key = `${message.thread_type}:${message.thread_id}`;
+        const key =
+          message.thread_type === "profile"
+            ? (message.sender_id === user.id ? message.thread_id : message.sender_id)
+            : `${message.thread_type}:${message.thread_id}`;
         nextMessages[key] = [
           ...(nextMessages[key] ?? []),
           mapChatMessageRow(message),
@@ -963,17 +987,84 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user]);
 
+  const refreshAcceptedFriends = useCallback(async () => {
+    if (!user) {
+      setAcceptedFriends([]);
+      return;
+    }
+
+    const { data: friendships, error: friendshipsError } = await supabase
+      .from("friendships")
+      .select("requester_id, addressee_id")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`)
+      .returns<FriendshipRow[]>();
+
+    if (friendshipsError) {
+      console.warn("accepted friends fetch failed", friendshipsError.message);
+      return;
+    }
+
+    const friendIds = Array.from(
+      new Set(
+        (friendships ?? [])
+          .map((friendship) =>
+            friendship.requester_id === user.id ? friendship.addressee_id : friendship.requester_id,
+          )
+          .filter((id) => id && id !== user.id),
+      ),
+    );
+
+    if (!friendIds.length) {
+      setAcceptedFriends([]);
+      return;
+    }
+
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, username, display_name, avatar_url, bio, home_location_name")
+      .in("id", friendIds)
+      .returns<ProfileRow[]>();
+
+    if (profilesError) {
+      console.warn("accepted friend profiles fetch failed", profilesError.message);
+      return;
+    }
+
+    const nextFriends = (profiles ?? [])
+      .map(mapProfileToUser)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    setAcceptedFriends((prev) => (areUsersListEqual(prev, nextFriends) ? prev : nextFriends));
+  }, [user]);
+
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isAppActive) {
+      if (!user) setAcceptedFriends([]);
+      return;
+    }
+    void refreshAcceptedFriends();
+    const interval = setInterval(() => {
+      void refreshAcceptedFriends();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [isAppActive, refreshAcceptedFriends, user]);
+
+  useEffect(() => {
+    if (!user || !isAppActive) {
+      if (!user) {
+        setLocalMessages({});
+      }
+      return;
+    }
     void refreshSocialThreads();
     const interval = setInterval(() => {
       void refreshSocialThreads();
     }, 60000);
     return () => clearInterval(interval);
-  }, [refreshSocialThreads, user]);
+  }, [isAppActive, refreshSocialThreads, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isAppActive) return;
 
     const channel = supabase
       .channel(`locals-chat-${user.id}`)
@@ -983,7 +1074,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         (payload) => {
           const row = payload.new as ChatMessageRow;
           if (!row.thread_type || !row.thread_id) return;
-          mergeThreadMessages(`${row.thread_type}:${row.thread_id}`, [mapChatMessageRow(row)]);
+          const key =
+            row.thread_type === "profile"
+              ? (row.sender_id === user.id ? row.thread_id : row.sender_id)
+              : `${row.thread_type}:${row.thread_id}`;
+          mergeThreadMessages(key, [mapChatMessageRow(row)]);
         },
       )
       .subscribe();
@@ -991,15 +1086,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [mergeThreadMessages, user]);
+  }, [isAppActive, mergeThreadMessages, user]);
 
   useEffect(() => {
     if (!user) return;
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refreshSocialThreads();
+    const subscription = AppState.addEventListener("change", (state: AppStateStatus) => {
+      const active = state === "active";
+      setIsAppActive(active);
+      if (active) {
+        void refreshAcceptedFriends();
+        void refreshSocialThreads();
+      }
     });
     return () => subscription.remove();
-  }, [refreshSocialThreads, user]);
+  }, [refreshAcceptedFriends, refreshSocialThreads, user]);
 
   const markThreadRead = useCallback(async (threadId: string) => {
     if (!user) return;
@@ -1515,6 +1615,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       comments,
       parties,
       groups,
+      acceptedFriends,
       mapFriends,
       setMapFriends,
       localMessages,
@@ -1543,6 +1644,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       comments,
       parties,
       groups,
+      acceptedFriends,
       mapFriends,
       setMapFriends,
       localMessages,

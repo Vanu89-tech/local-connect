@@ -10,9 +10,9 @@ const SIM_LAT = 48.3655;
 const SIM_LNG = 10.8947;
 const FRIEND_COUNT = 30;
 const LOCAL_COUNT  = 70;
-const TRANSIT_COUNT = 62;
 const WORLD_ICON_COUNT = 14;
-const SIM_ENGINE_VERSION = "Sim Engine V6";
+const SIM_CENTER_RADIUS_M = 500;
+const SIM_ENGINE_VERSION = "Sim Engine V10";
 
 function buildSimHtml(lat: number, lng: number): string {
   const mapStyle  = Colors.map;
@@ -43,7 +43,23 @@ function buildSimHtml(lat: number, lng: number): string {
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:var(--paper); font-family:"Avenir Next","Trebuchet MS","Arial Rounded MT Bold",sans-serif; overflow:hidden; }
   #map { width:100vw; height:100vh; }
-  #transit-layer { position:fixed; inset:0; z-index:470; pointer-events:none; overflow:hidden; }
+  #friend-layer {
+    position:fixed; inset:0; z-index:560; pointer-events:none; overflow:hidden;
+  }
+  #sim-me-focus {
+    position:fixed; left:50%; top:50%; z-index:570; pointer-events:none;
+    transform:translate(-50%,-50%);
+  }
+  #sim-me-focus .fig { --symbol-scale:1; }
+  #sim-diagnostics {
+    position:fixed; left:14px; right:14px; bottom:206px; z-index:610;
+    max-height:52px; overflow:hidden; pointer-events:none;
+    background:rgba(7,19,31,0.88); border:1px solid rgba(239,255,58,0.36);
+    border-radius:10px; padding:7px 9px;
+    color:#eafbff; font:800 8px/1.25 "Avenir Next",sans-serif;
+  }
+  #sim-diagnostics .bad { color:#ff5bd8; }
+  #sim-diagnostics .good { color:#efff3a; }
   #parchment-overlay {
     position:fixed; inset:0; pointer-events:none; z-index:330;
     background:
@@ -81,6 +97,7 @@ function buildSimHtml(lat: number, lng: number): string {
   .pulse { animation:pulse 2s infinite; }
   @keyframes pulse { 0%{opacity:1} 50%{opacity:0.68} 100%{opacity:1} }
   .sim-culled { opacity:0 !important; pointer-events:none !important; }
+  .friend-out-of-radius { opacity:0 !important; pointer-events:none !important; }
   body.quality-weak .sim-float-icon { animation:none !important; }
   .entity-marker.closed { filter:saturate(0.35) brightness(0.72); opacity:0.62; }
   .entity-marker.busy .sim-float-icon,
@@ -90,7 +107,6 @@ function buildSimHtml(lat: number, lng: number): string {
   .entity-marker.event-live .entity-label { color:#efff3a; text-shadow:0 0 8px rgba(239,255,58,0.8); }
   .friend-marker-wrap.status-social .fig-head,
   .friend-marker-wrap.status-party .fig-head { background:#ff2bd6; box-shadow:0 0 8px rgba(255,43,214,0.95),0 0 18px rgba(255,43,214,0.55); }
-  .friend-marker-wrap.status-transit .fig-head { background:#00f0ff; box-shadow:0 0 8px rgba(0,240,255,0.95),0 0 18px rgba(0,240,255,0.55); }
   .friend-marker-wrap.status-food .fig-head { background:#00ffb2; box-shadow:0 0 8px rgba(0,255,178,0.95),0 0 18px rgba(0,255,178,0.55); }
   .friend-pulse { animation:friendPulse 1.9s infinite; }
   @keyframes friendPulse {
@@ -200,40 +216,10 @@ function buildSimHtml(lat: number, lng: number): string {
   .friend-marker-wrap {
     display:flex; flex-direction:column; align-items:center;
     transform-origin:50% 100%; pointer-events:none;
+    position:absolute; left:0; top:0; will-change:transform,opacity;
   }
   .friend-marker-wrap .fig { pointer-events:auto; }
   /* ── Game world entities ───────────────────────────────────────── */
-  .transit-wrap {
-    position:relative; width:28px; height:28px; display:flex; align-items:center; justify-content:center;
-    transform-origin:50% 50%; pointer-events:auto; touch-action:manipulation;
-  }
-  .transit-core {
-    font-size:20px; line-height:1;
-    transform:scale(var(--lod-scale,1));
-    transform-origin:50% 50%;
-    filter:drop-shadow(0 0 4px rgba(0,240,255,0.7));
-  }
-  .transit-wrap.bus .transit-core { filter:drop-shadow(0 0 5px rgba(255,43,214,0.9)); }
-  .transit-wrap.tram .transit-core { filter:drop-shadow(0 0 5px rgba(239,255,58,0.9)); }
-  .transit-wrap.train .transit-core { filter:drop-shadow(0 0 5px rgba(0,240,255,0.9)); }
-  .transit-wrap::after {
-    content:""; position:absolute; left:50%; top:50%; width:8px; height:2px;
-    background:rgba(234,251,255,0.92); transform:translate(-50%, 16px);
-    border-radius:50%;
-  }
-  .transit-screen {
-    position:absolute; left:0; top:0; width:28px; height:28px;
-    display:flex; align-items:center; justify-content:center; pointer-events:none;
-    transform:translate(-9999px,-9999px); will-change:transform,opacity;
-  }
-  .transit-screen-core {
-    font-size:20px; line-height:1;
-    transform:scale(var(--lod-scale,1));
-    transform-origin:50% 50%;
-  }
-  .transit-screen.bus .transit-screen-core { filter:drop-shadow(0 0 5px rgba(255,43,214,0.9)); }
-  .transit-screen.tram .transit-screen-core { filter:drop-shadow(0 0 5px rgba(239,255,58,0.9)); }
-  .transit-screen.train .transit-screen-core { filter:drop-shadow(0 0 5px rgba(0,240,255,0.9)); }
   .entity-marker {
     position:relative; display:flex; flex-direction:column; align-items:center; gap:4px;
     transform-origin:50% 100%; pointer-events:auto;
@@ -307,6 +293,7 @@ function buildSimHtml(lat: number, lng: number): string {
   .sim-sep { width:1px; height:24px; background:rgba(0,240,255,0.18); }
   .sim-label { font-size:9px; font-weight:800; color:#3a5a70; text-transform:uppercase; letter-spacing:0.5px; font-family:"Avenir Next",sans-serif; }
   .sim-val   { font-size:13px; font-weight:900; color:#efff3a; min-width:28px; text-align:center; font-family:"Avenir Next",sans-serif; }
+  .sim-val.radius { min-width:42px; }
   .sim-btn.wide { width:auto; min-width:48px; border-radius:17px; padding:0 9px; font-weight:900; font-size:10px; }
   body.scenario-night #parchment-overlay,
   body.scenario-event #parchment-overlay { opacity:1; }
@@ -315,27 +302,29 @@ function buildSimHtml(lat: number, lng: number): string {
 </head>
 <body>
 <div id="map"></div>
-<div id="transit-layer"></div>
+<div id="friend-layer"></div>
+<div id="sim-me-focus" aria-hidden="true"></div>
 <div id="parchment-overlay"></div>
 <div id="vignette"></div>
 <div id="lod-focus" aria-hidden="true"></div>
+<div id="sim-diagnostics" aria-hidden="true"></div>
 <button id="recenter" aria-label="Zentrieren" type="button">⌖</button>
 
 <!-- Simulation HUD -->
 <div id="sim-hud">
-  <div class="hud-chip">SIM &nbsp;👥 <span id="hud-total">${FRIEND_COUNT + LOCAL_COUNT + TRANSIT_COUNT + WORLD_ICON_COUNT}</span></div>
+  <div class="hud-chip">SIM &nbsp;👥 <span id="hud-total">${FRIEND_COUNT + LOCAL_COUNT + WORLD_ICON_COUNT}</span></div>
   <div class="hud-chip">FPS <span id="hud-fps">60</span></div>
   <div class="hud-chip">LOD <span id="hud-lod">3</span></div>
-  <div class="hud-chip">R <span id="hud-radius">900m</span></div>
+  <div class="hud-chip">R <span id="hud-radius">${SIM_CENTER_RADIUS_M}m</span></div>
   <div class="hud-chip">PHONE <span id="hud-quality">STRONG</span></div>
   <div class="hud-chip">SCN <span id="hud-scenario">DAY</span></div>
   <div class="hud-chip">TIME <span id="hud-clock">14:00</span></div>
   <div class="hud-chip">⭐ <span id="hud-friends">${FRIEND_COUNT}</span> Freunde</div>
-  <div class="hud-chip">🚋 <span id="hud-transit">${TRANSIT_COUNT}</span></div>
   <div class="hud-chip">🏪 <span id="hud-places">${WORLD_ICON_COUNT}</span></div>
   <div class="hud-chip">🚶 <span id="hud-walking">0</span></div>
   <div class="hud-chip">EVT <span id="hud-events">0</span></div>
   <div class="hud-chip">MS <span id="hud-tickms">0</span></div>
+  <div class="hud-chip">DBG <span id="hud-friend-debug">-</span></div>
 </div>
 
 <!-- Simulation Controls -->
@@ -356,6 +345,11 @@ function buildSimHtml(lat: number, lng: number): string {
   <button class="sim-btn wide" id="scenario-night" onclick="simSetScenario('night')" title="Bars und Clubs">NITE</button>
   <button class="sim-btn wide" id="scenario-event" onclick="simSetScenario('event')" title="Grossevent">EVT</button>
   <button class="sim-btn wide" id="scenario-stress" onclick="simSetScenario('stress')" title="Stress Test">LOAD</button>
+  <div class="sim-sep"></div>
+  <span class="sim-label">Radius</span>
+  <button class="sim-btn" onclick="simChangeRadius(-1)" title="Radius kleiner">−</button>
+  <span class="sim-val radius" id="radius-val">${SIM_CENTER_RADIUS_M}m</span>
+  <button class="sim-btn" onclick="simChangeRadius(1)" title="Radius groesser">+</button>
 </div>
 
 <script>
@@ -367,9 +361,9 @@ var SIM_LNG = ${lng};
 var LAT_PER_M = 1 / 111320;
 
 var FRIEND_NAMES = [
-  'Lena','Max','Anna','Felix','Sophie','Jonas','Marie','Lukas','Emma','Paul',
-  'Laura','Tim','Mia','Jan','Julia','David','Hannah','Tobias','Lea','Niklas',
-  'Lisa','Moritz','Clara','Simon','Sarah','Finn','Nina','Leon','Amelie','Noah'
+  'Mara','Ben','Nora','Elias','Kira','Theo','Livia','Oskar','Mila','Henri',
+  'Jule','Anton','Romy','Luis','Ida','Noel','Fina','Levi','Tara','Mats',
+  'Alva','Emil','Nele','Pepe','Lio','Frieda','Joris','Malou','Enno','Lene'
 ];
 var LOCAL_NAMES = [
   'Marco','Elena','Ivan','Yuki','Rania','Omar','Priya','Carlos','Aisha','Dmitri',
@@ -386,15 +380,14 @@ var USER_ACTIVITIES = [
   { id:'food', label:'essen', status:'food', weight:12 },
   { id:'social', label:'trifft Leute', status:'social', weight:14 },
   { id:'party', label:'im Nachtleben', status:'party', weight:8 },
-  { id:'transit', label:'fährt mit Öffis', status:'transit', weight:10 },
   { id:'quiet', label:'nicht stören', status:'quiet', weight:6 },
 ];
 var SCENARIOS = {
-  day:    { label:'DAY',   timeHour:14, userSpeed:1.0, transitSpeed:1.0, crowd:0.42, eventRate:0.32, loadBudget:1.0 },
-  rush:   { label:'RUSH',  timeHour:17, userSpeed:1.12, transitSpeed:0.86, crowd:0.62, eventRate:0.46, loadBudget:1.12 },
-  night:  { label:'NITE',  timeHour:22, userSpeed:0.92, transitSpeed:0.92, crowd:0.78, eventRate:0.72, loadBudget:1.0 },
-  event:  { label:'EVT',   timeHour:20, userSpeed:1.04, transitSpeed:0.78, crowd:0.88, eventRate:0.9,  loadBudget:1.18 },
-  stress: { label:'LOAD',  timeHour:19, userSpeed:1.18, transitSpeed:1.1,  crowd:0.95, eventRate:1.0,  loadBudget:1.7 },
+  day:    { label:'DAY',   timeHour:14, userSpeed:1.0,  crowd:0.42, eventRate:0.32, loadBudget:1.0 },
+  rush:   { label:'RUSH',  timeHour:17, userSpeed:1.12, crowd:0.62, eventRate:0.46, loadBudget:1.12 },
+  night:  { label:'NITE',  timeHour:22, userSpeed:0.92, crowd:0.78, eventRate:0.72, loadBudget:1.0 },
+  event:  { label:'EVT',   timeHour:20, userSpeed:1.04, crowd:0.88, eventRate:0.9,  loadBudget:1.18 },
+  stress: { label:'LOAD',  timeHour:19, userSpeed:1.18, crowd:0.95, eventRate:1.0,  loadBudget:1.7 },
 };
 var SIM_STATE = {
   scenario:'day',
@@ -455,35 +448,39 @@ var PERF = {
   totalRenderable: 0,
 };
 
+var SIM_RADIUS_STEPS = [50, 100, 200, 500, 1000];
+var simRadiusIdx = Math.max(0, SIM_RADIUS_STEPS.indexOf(${SIM_CENTER_RADIUS_M}));
+var simRadiusM = SIM_RADIUS_STEPS[simRadiusIdx];
+
 var QUALITY = {
   weak: {
     label: 'WEAK',
     tickMs: 50,
     budget: 150,
-    typeRadius: { transit: 1.0, friend: 1.0, person: 1.0, poi: 1.0 },
-    typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
-    labelDistanceM: 150,
-    lodRadiusM: 2200,
+    typeRadius: { friend: 1.0, person: 1.0, poi: 1.0 },
+    typeCost:   { friend: 2,   person: 3,   poi: 2   },
+    labelDistanceM: simRadiusM,
+    lodRadiusM: simRadiusM,
     minZoom: 11.75,
   },
   medium: {
     label: 'MID',
     tickMs: 33,
     budget: 350,
-    typeRadius: { transit: 1.0, friend: 1.0, person: 1.0, poi: 1.0 },
-    typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
-    labelDistanceM: 320,
-    lodRadiusM: 2200,
+    typeRadius: { friend: 1.0, person: 1.0, poi: 1.0 },
+    typeCost:   { friend: 2,   person: 3,   poi: 2   },
+    labelDistanceM: simRadiusM,
+    lodRadiusM: simRadiusM,
     minZoom: 11.75,
   },
   strong: {
     label: 'STRONG',
     tickMs: 16,
     budget: 800,
-    typeRadius: { transit: 1.0, friend: 1.0, person: 1.0, poi: 1.0 },
-    typeCost:   { transit: 1,   friend: 2,   person: 3,   poi: 2   },
-    labelDistanceM: 620,
-    lodRadiusM: 2200,
+    typeRadius: { friend: 1.0, person: 1.0, poi: 1.0 },
+    typeCost:   { friend: 2,   person: 3,   poi: 2   },
+    labelDistanceM: simRadiusM,
+    lodRadiusM: simRadiusM,
     minZoom: 11.75,
   },
 };
@@ -502,7 +499,7 @@ function setQuality(level) {
     if (btn) btn.classList.toggle('on', name === level);
   });
   var radius = document.getElementById('hud-radius');
-  if (radius) radius.textContent = profile.lodRadiusM + 'm';
+  if (radius) radius.textContent = formatRadiusLabel(simRadiusM);
   updateLodRadiusOverlay();
   if (window.map) {
     map.setMinZoom(profile.minZoom);
@@ -510,6 +507,50 @@ function setQuality(level) {
       map.easeTo({ zoom: profile.minZoom, duration: 260 });
     }
   }
+}
+
+function formatRadiusLabel(radiusM) {
+  return radiusM >= 1000 ? (radiusM / 1000) + 'km' : radiusM + 'm';
+}
+
+function getSimFocusPoint() {
+  if (window.map) {
+    var center = map.getCenter();
+    return { lat: center.lat, lng: center.lng };
+  }
+  return { lat: SIM_LAT, lng: SIM_LNG };
+}
+
+function syncRadiusFocus() {
+  var focus = getSimFocusPoint();
+  radarSizing.lat = focus.lat;
+  radarSizing.lng = focus.lng;
+  radarSizing.radiusM = simRadiusM;
+}
+
+function rescaleRadiusAwareMarkers() {
+  if (!window._simMarkers) return;
+  Object.keys(window._simMarkers).forEach(function(id) {
+    var entry = window._simMarkers[id];
+    if (!entry || !entry.agent) return;
+    if (entry.fig) applyFigureScale(entry.fig, entry.agent.lat, entry.agent.lng);
+  });
+}
+
+function setSimRadius(radiusM) {
+  simRadiusM = radiusM;
+  Object.keys(QUALITY).forEach(function(level) {
+    QUALITY[level].labelDistanceM = radiusM;
+    QUALITY[level].lodRadiusM = radiusM;
+  });
+  syncRadiusFocus();
+  var hudRadius = document.getElementById('hud-radius');
+  if (hudRadius) hudRadius.textContent = formatRadiusLabel(radiusM);
+  var radiusVal = document.getElementById('radius-val');
+  if (radiusVal) radiusVal.textContent = formatRadiusLabel(radiusM);
+  rescaleRadiusAwareMarkers();
+  updateLodRadiusOverlay();
+  updateLodForAll();
 }
 
 function updatePerformanceSample() {
@@ -533,6 +574,7 @@ function updatePerformanceSample() {
 
 var _LOD_SHOW = 0.06;
 var _LOD_CAMERA_ACTIVE = false;
+var FRIEND_APPROACH_EPS_M = 1.5;
 
 function lodScore(distanceM, kind, zoom) {
   var profile = QUALITY[PERF.quality];
@@ -547,6 +589,7 @@ function lodScore(distanceM, kind, zoom) {
 
 function setLodVisibility(el, visible, score) {
   if (!el) return false;
+  el.classList.remove('friend-out-of-radius');
   if (!visible) {
     if (!el.classList.contains('sim-culled')) el.classList.add('sim-culled');
     el.dataset.lod = '0';
@@ -562,12 +605,208 @@ function setLodVisibility(el, visible, score) {
   return true;
 }
 
+function positionScreenOverlay(el, lat, lng) {
+  if (!el || !window.map) return null;
+  var point = map.project([lng, lat]);
+  el.style.transform = 'translate(' + point.x.toFixed(1) + 'px,' + point.y.toFixed(1) + 'px) translate(-50%,-50%)';
+  return point;
+}
+
+function setFriendLodVisibility(entry, item, now) {
+  var el = entry && (entry.wrap || entry.el);
+  if (!el) return false;
+  var screenPoint = positionScreenOverlay(el, entry.agent.lat, entry.agent.lng);
+
+  if (!entry.friendLod) {
+    entry.friendLod = {
+      visible: false,
+      lastVisibleAt: 0,
+      lastDistanceM: null,
+      lastDecision: 'init',
+      approaching: false,
+    };
+  }
+
+  var state = entry.friendLod;
+  var previousDistance = typeof state.lastDistanceM === 'number' ? state.lastDistanceM : item.distanceM;
+  var approaching = item.distanceM <= previousDistance - FRIEND_APPROACH_EPS_M;
+  var insideEnterRadius = item.distanceM <= item.radiusM;
+  var visible = insideEnterRadius;
+
+  state.lastDistanceM = item.distanceM;
+  state.approaching = approaching;
+  state.lastDecision = visible ? 'inside-radius' : 'outside-radius';
+  state.screenX = screenPoint ? screenPoint.x : null;
+  state.screenY = screenPoint ? screenPoint.y : null;
+
+  if (visible) {
+    state.lastVisibleAt = now;
+    state.visible = true;
+    el.classList.remove('friend-out-of-radius');
+    el.classList.remove('sim-culled');
+    el.dataset.lod = '1';
+    el.dataset.visible = '1';
+    var displayScore = Math.max(_LOD_SHOW, item.score || 0);
+    var scale = Math.min(1.12, 0.55 + displayScore * 0.57);
+    el.style.setProperty('--lod-scale', scale.toFixed(3));
+    el.style.opacity = '1';
+    return true;
+  }
+
+  state.visible = false;
+  el.classList.remove('sim-culled');
+  if (!el.classList.contains('friend-out-of-radius')) el.classList.add('friend-out-of-radius');
+  el.dataset.lod = '0';
+  el.dataset.visible = '0';
+  return false;
+}
+
+function inspectCenterElement() {
+  var el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+  if (!el) return 'none';
+  var friend = el.closest && el.closest('.friend-marker-wrap');
+  if (friend) return friend.dataset.name || friend.id || 'friend';
+  return el.id || el.className || el.tagName;
+}
+
+function friendDiagnosticLine(item) {
+  var entry = item.entry;
+  var state = entry.friendLod || {};
+  var el = entry.wrap || entry.el;
+  var className = el ? String(el.className || '').replace(/\\s+/g, '.') : '-';
+  var opacity = el ? (el.style.opacity || getComputedStyle(el).opacity) : '-';
+  var verdict = state.visible ? 'good' : 'bad';
+  return '<span class="' + verdict + '">' + entry.agent.name + '</span> ' +
+    Math.round(item.distanceM) + '/' + Math.round(item.radiusM) + 'm ' +
+    (state.visible ? 'vis' : 'hide') +
+    ' lod=' + (el ? el.dataset.lod : '-') +
+    ' op=' + opacity +
+    ' z=' + (el ? el.style.zIndex || '-' : '-') +
+    ' xy=' + (state.screenX == null ? '-' : Math.round(state.screenX) + ',' + Math.round(state.screenY)) +
+    ' cls=' + className;
+}
+
+function updateFriendDebug(candidates) {
+  var debug = document.getElementById('hud-friend-debug');
+  var diagnostics = document.getElementById('sim-diagnostics');
+  var friendCandidates = candidates
+    .filter(function(item) { return item.kind === 'friend' && item.entry && item.entry.agent; })
+    .sort(function(a, b) { return a.distanceM - b.distanceM; });
+  if (!friendCandidates.length) {
+    if (debug) debug.textContent = '-';
+    if (diagnostics) diagnostics.innerHTML = 'no friends';
+    return;
+  }
+  var item = friendCandidates[0];
+  var state = item.entry.friendLod || {};
+  if (debug) debug.textContent =
+    item.entry.agent.name +
+    ' ' + Math.round(item.distanceM) + '/' + Math.round(item.radiusM) + 'm ' +
+    (state.visible ? 'vis' : 'hide') +
+    (state.approaching ? ' ↓' : '') +
+    ' ' + (state.lastDecision || '');
+  if (diagnostics) {
+    var testStatus = window._simVisibilityTestResult
+      ? window._simVisibilityTestResult.ok
+        ? ' tests=pass'
+        : ' tests=fail(' + window._simVisibilityTestResult.failures.length + ')'
+      : ' tests=pending';
+    diagnostics.innerHTML =
+      'center=' + inspectCenterElement() + ' radius=' + simRadiusM + 'm' + testStatus + '<br>' +
+      friendCandidates.slice(0, 5).map(friendDiagnosticLine).join('<br>');
+  }
+}
+
+function findFriendByName(name) {
+  var needle = String(name || '').toLowerCase();
+  return SIM.agents.find(function(agent) {
+    return agent.isFriend && agent.name.toLowerCase() === needle;
+  }) || null;
+}
+
+function simCenterOnFriend(name) {
+  var friend = findFriendByName(name);
+  if (!friend || !window.map) return false;
+  map.jumpTo({ center:[friend.lng, friend.lat] });
+  updateLodForAll();
+  return true;
+}
+window.simCenterOnFriend = simCenterOnFriend;
+
+function currentFriendAssertions() {
+  var center = getSimFocusPoint();
+  return SIM.agents
+    .filter(function(agent) { return agent.isFriend; })
+    .map(function(agent) {
+      var entry = window._simMarkers && window._simMarkers[agent.id];
+      var d = distM(center.lat, center.lng, agent.lat, agent.lng);
+      var expected = d <= simRadiusM;
+      var actual = !!(entry && entry._lodVisible);
+      var el = entry && entry.wrap;
+      return {
+        id: agent.id,
+        name: agent.name,
+        distanceM: d,
+        radiusM: simRadiusM,
+        expected: expected,
+        actual: actual,
+        pass: expected === actual,
+        lod: el ? el.dataset.lod : 'missing',
+        classes: el ? String(el.className || '') : 'missing',
+        opacity: el ? (el.style.opacity || getComputedStyle(el).opacity) : 'missing',
+      };
+    });
+}
+window.simFriendAssertions = currentFriendAssertions;
+
+function simRunVisibilityTests() {
+  if (!window.map || !window._simMarkers) return { ok:false, failures:['map-not-ready'] };
+  var originalCenter = map.getCenter();
+  var originalRadius = simRadiusM;
+  var failures = [];
+
+  SIM_RADIUS_STEPS.forEach(function(radiusM) {
+    setSimRadius(radiusM);
+    SIM.agents.filter(function(agent) { return agent.isFriend; }).forEach(function(agent) {
+      map.jumpTo({ center:[agent.lng, agent.lat] });
+      updateLodForAll();
+      var centered = currentFriendAssertions().find(function(row) { return row.id === agent.id; });
+      if (!centered || !centered.actual || centered.distanceM > 0.6) {
+        failures.push(agent.name + ' center r' + radiusM + ' d=' + (centered ? centered.distanceM.toFixed(2) : 'missing'));
+      }
+
+      map.jumpTo({ center:[agent.lng + metersToLng(radiusM + 60, agent.lat), agent.lat] });
+      updateLodForAll();
+      var outside = currentFriendAssertions().find(function(row) { return row.id === agent.id; });
+      if (!outside || outside.actual || outside.distanceM <= radiusM) {
+        failures.push(agent.name + ' outside r' + radiusM + ' d=' + (outside ? outside.distanceM.toFixed(2) : 'missing'));
+      }
+    });
+  });
+
+  map.jumpTo({ center:[originalCenter.lng, originalCenter.lat] });
+  setSimRadius(originalRadius);
+  updateLodForAll();
+  window._simVisibilityTestResult = { ok: failures.length === 0, failures: failures };
+  var diagnostics = document.getElementById('sim-diagnostics');
+  if (diagnostics) {
+    diagnostics.innerHTML = failures.length
+      ? '<span class="bad">tests failed</span><br>' + failures.slice(0, 4).join('<br>')
+      : '<span class="good">visibility tests passed</span>';
+  }
+  return window._simVisibilityTestResult;
+}
+window.simRunVisibilityTests = simRunVisibilityTests;
+
 function updateLodForAll() {
-  if (!window._simMarkers || !window._worldMarkers || !window._transitMarkers || !window.map) return;
+  if (!window._simMarkers || !window._worldMarkers || !window.map) return;
+  syncRadiusFocus();
+  rescaleRadiusAwareMarkers();
   updateLodRadiusOverlay();
-  var center = map.getCenter();
+  var center = getSimFocusPoint();
   var zoom = map.getZoom();
   var profile = QUALITY[PERF.quality];
+  var now = Date.now();
 
   var candidates = [];
 
@@ -581,6 +820,7 @@ function updateLodForAll() {
       distanceM: d,
       radiusM: radiusM,
       score: score,
+      kind: kind,
       sortVal: score * (1 + (priority || 0) * 0.004) + (wasVisible ? 0.04 : 0),
       cost: profile.typeCost[kind] || 2,
       wasVisible: wasVisible,
@@ -594,10 +834,6 @@ function updateLodForAll() {
       entry.agent.isFriend ? 'friend' : 'person',
       entry.agent.isFriend ? 78 : 34);
   });
-  Object.keys(window._transitMarkers).forEach(function(id) {
-    var entry = window._transitMarkers[id];
-    addEntry(entry, entry.entity.lat, entry.entity.lng, 'transit', entry.entity.priority || 86);
-  });
   Object.keys(window._worldMarkers).forEach(function(id) {
     var entry = window._worldMarkers[id];
     addEntry(entry, entry.entity.lat, entry.entity.lng, 'poi', entry.entity.priority || 50);
@@ -609,15 +845,29 @@ function updateLodForAll() {
 
   candidates.forEach(function(item) {
     var el = item.entry.wrap || item.entry.el;
-    var insideRadius = item.distanceM <= item.radiusM;
-    item.entry._lodVisible = setLodVisibility(el, insideRadius, insideRadius ? item.score : 0);
+    if (item.kind === 'friend') {
+      item.entry._lodVisible = setFriendLodVisibility(item.entry, item, now);
+    } else {
+      var insideRadius = item.distanceM <= item.radiusM;
+      item.entry._lodVisible = setLodVisibility(el, insideRadius, insideRadius ? item.score : 0);
+    }
     if (item.entry._lodVisible) visible++;
   });
 
+  updateFriendDebug(candidates);
   PERF.visibleEntities = visible;
   PERF.totalRenderable = candidates.length;
   var hudLod = document.getElementById('hud-lod');
   if (hudLod) hudLod.textContent = String(visible);
+}
+
+var pendingLodFrame = 0;
+function scheduleLodUpdate() {
+  if (pendingLodFrame) return;
+  pendingLodFrame = requestAnimationFrame(function() {
+    pendingLodFrame = 0;
+    updateLodForAll();
+  });
 }
 
 function metersPerPixelAtCenter() {
@@ -652,8 +902,9 @@ var SIM = (function() {
     var agents = [];
     var fi = 0, li = 0;
     var friendAnchors = [
-      { n:-120, e:-360 }, { n:180, e:-240 }, { n:330, e:80 }, { n:-280, e:210 },
-      { n:60, e:390 }, { n:-430, e:-120 }, { n:430, e:-420 }, { n:-40, e:80 },
+      { n:-80, e:-220 }, { n:95, e:-185 }, { n:210, e:-35 }, { n:155, e:170 },
+      { n:-45, e:245 }, { n:-215, e:110 }, { n:-245, e:-90 }, { n:20, e:70 },
+      { n:285, e:135 }, { n:-310, e:205 },
     ];
     var localAnchors = [
       { n:-180, e:-520 }, { n:260, e:-420 }, { n:520, e:-110 }, { n:420, e:360 },
@@ -668,7 +919,7 @@ var SIM = (function() {
       var dist  = 18 + seeded(fi * 7.7) * (76 + ring * 22);
       var p = offsetPoint(anchor.n + Math.sin(angle) * dist, anchor.e + Math.cos(angle) * dist);
       agents.push({
-        id: 'sim-friend-' + fi,
+        id: 'sim-v8-friend-' + fi,
         entityType: 'user',
         source: 'mockUsersAdapter',
         name: FRIEND_NAMES[fi],
@@ -676,16 +927,16 @@ var SIM = (function() {
         relation: 'friend',
         visibility: 'friends',
         online: true,
-        activity: weightedActivity(fi * 11.1),
+        activity: USER_ACTIVITIES[0],
         priority: 86,
         lat: p.lat,
         lng: p.lng,
         maxRadius: 980,
-        speed: 0.8 + seeded(fi * 5.5) * 0.9,
+        speed: 0,
         state: 'idle',
-        idleUntil: Date.now() + seeded(fi * 17) * 7000,
+        idleUntil: Number.POSITIVE_INFINITY,
         targetLat: null, targetLng: null,
-        heading: seeded(fi * 23) * 360,
+        heading: 0,
         updatedAt: Date.now(),
         // extensibility data bag – mechanics can add arbitrary properties
         data: {},
@@ -733,7 +984,7 @@ var SIM = (function() {
   function pickTarget(agent) {
     var angle = Math.random() * Math.PI * 2;
     var scenario = currentScenario();
-    var step  = 40 + Math.random() * (agent.activity && agent.activity.id === 'transit' ? 260 : 180);
+    var step  = 40 + Math.random() * 180;
     var nLat  = agent.lat + metersToLat(Math.sin(angle) * step);
     var nLng  = agent.lng + metersToLng(Math.cos(angle) * step, agent.lat);
     if (WORLD_ENTITIES && WORLD_ENTITIES.length && Math.random() < scenario.crowd * 0.24) {
@@ -767,7 +1018,6 @@ var SIM = (function() {
     var now = Date.now();
     if (cameraInteracting) {
       lastTick = now;
-      updateTransitScreenPositions();
       updateLodForAll();
       return;
     }
@@ -779,19 +1029,18 @@ var SIM = (function() {
     var walkCount = 0;
 
     runMechanicHook('onTick', [agents, dt]);
-    updateTransit(dt);
     updateWorldEntities(now);
     runLiveEventEngine(now, dt);
 
     agents.forEach(function(agent) {
+      if (agent.isFriend) return;
       if (agent.state === 'idle') {
         if (now >= agent.idleUntil) pickTarget(agent);
       } else {
         var dLat  = agent.targetLat - agent.lat;
         var dLng  = agent.targetLng - agent.lng;
         var d     = distM(agent.lat, agent.lng, agent.targetLat, agent.targetLng);
-        var activityBoost = agent.activity && agent.activity.id === 'transit' ? 1.3 : 1;
-        var stepM = agent.speed * scenario.userSpeed * activityBoost * dt / 1000;
+        var stepM = agent.speed * scenario.userSpeed * dt / 1000;
         if (d < stepM + 0.3) {
           agent.lat = agent.targetLat;
           agent.lng = agent.targetLng;
@@ -815,9 +1064,11 @@ var SIM = (function() {
     agents.forEach(function(agent) {
       var entry = window._simMarkers && window._simMarkers[agent.id];
       if (!entry) return;
-      entry.marker.setLngLat([agent.lng, agent.lat]);
       entry.agent = agent;
-      applyUserStatus(entry, agent);
+      if (!agent.isFriend) {
+        entry.marker.setLngLat([agent.lng, agent.lat]);
+        applyUserStatus(entry, agent);
+      }
       if (entry.fig) {
         // speed derived from state (idle=0, walk=1.0, run=3.0)
         var spd = agent.state === 'walk' ? agent.speed : agent.state === 'run' ? 3.0 : 0;
@@ -829,15 +1080,13 @@ var SIM = (function() {
     document.getElementById('hud-walking').textContent = String(walkCount);
     var snapshot = collectLiveSnapshot();
     var hudTotal = document.getElementById('hud-total');
-    if (hudTotal) hudTotal.textContent = String(snapshot.users.length + snapshot.transit.length + snapshot.places.length + snapshot.events.length);
+    if (hudTotal) hudTotal.textContent = String(snapshot.users.length + snapshot.places.length + snapshot.events.length);
     var hudPlaces = document.getElementById('hud-places');
     if (hudPlaces) hudPlaces.textContent = String(snapshot.places.length);
     var hudClock = document.getElementById('hud-clock');
     if (hudClock) hudClock.textContent = simClockLabel();
     var hudEvents = document.getElementById('hud-events');
     if (hudEvents) hudEvents.textContent = String(snapshot.events.length);
-    var hudTransit = document.getElementById('hud-transit');
-    if (hudTransit) hudTransit.textContent = String(snapshot.transit.length);
     var hudFriends = document.getElementById('hud-friends');
     if (hudFriends) hudFriends.textContent = String(snapshot.users.filter(function(e) { return e.payload && e.payload.isFriend; }).length);
     var tickCost = performance.now() - tickStarted;
@@ -868,93 +1117,8 @@ var SIM = (function() {
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TRANSIT + WORLD ENTITIES
+// WORLD ENTITIES
 // ─────────────────────────────────────────────────────────────────────────────
-function buildTransitEntities() {
-  var routeDefs = [
-    { id:'tram-1', type:'tram', label:'1', speed:14, count:5, points:[[-1200,2100],[-680,1220],[-260,420],[0,0],[420,-520],[780,-980],[980,-1450]] },
-    { id:'tram-2', type:'tram', label:'2', speed:15, count:5, points:[[1860,-1800],[1180,-1060],[420,-340],[0,0],[-520,380],[-1060,820],[-1580,1180]] },
-    { id:'tram-3', type:'tram', label:'3', speed:15, count:5, points:[[230,180],[-120,-120],[-760,-760],[-1400,-1460],[-2160,-2140],[-2860,-2750]] },
-    { id:'tram-4', type:'tram', label:'4', speed:13, count:4, points:[[1160,620],[620,320],[0,0],[-450,-260],[-980,-500],[-1480,-720],[-1960,-860]] },
-    { id:'tram-6', type:'tram', label:'6', speed:15, count:5, points:[[1450,2300],[860,1460],[320,620],[0,0],[-460,-620],[-920,-1260],[-1400,-2020],[-1840,-2760]] },
-    { id:'train-r1', type:'train', label:'R1', speed:24, count:3, points:[[-3600,2600],[-1980,1420],[-720,520],[0,0],[980,-620],[2100,-1320],[3500,-2200]] },
-    { id:'train-r2', type:'train', label:'R2', speed:22, count:3, points:[[3300,1800],[1900,960],[760,360],[0,0],[-920,-420],[-2160,-980],[-3400,-1540]] },
-    { id:'train-s', type:'train', label:'S', speed:20, count:3, points:[[2600,-2600],[1600,-1500],[720,-620],[0,0],[-820,740],[-1780,1640],[-2700,2500]] },
-    { id:'bus-21', type:'bus', label:'21', speed:11, count:3, points:[[1680,-1180],[1120,-620],[520,-160],[0,0],[-540,120],[-1040,420]] },
-    { id:'bus-22', type:'bus', label:'22', speed:11, count:3, points:[[1200,1600],[720,920],[180,280],[0,0],[-380,-620],[-760,-1240]] },
-    { id:'bus-23', type:'bus', label:'23', speed:10, count:3, points:[[2300,80],[1500,80],[760,60],[0,0],[-780,-80],[-1500,-160]] },
-    { id:'bus-24', type:'bus', label:'24', speed:10, count:3, points:[[720,-2180],[520,-1320],[260,-580],[0,0],[-220,720],[-360,1420]] },
-    { id:'bus-25', type:'bus', label:'25', speed:11, count:3, points:[[-1820,1320],[-980,820],[-420,360],[0,0],[680,-300],[1320,-640]] },
-    { id:'bus-26', type:'bus', label:'26', speed:10, count:3, points:[[1850,1260],[980,760],[410,320],[0,0],[-560,-420],[-1080,-960]] },
-    { id:'bus-32', type:'bus', label:'32', speed:11, count:3, points:[[-2200,-420],[-1240,-250],[-560,-110],[0,0],[620,240],[1320,520],[2040,820]] },
-    { id:'bus-35', type:'bus', label:'35', speed:10, count:3, points:[[2460,-900],[1620,-540],[780,-260],[0,0],[-520,540],[-840,1280]] },
-    { id:'bus-41', type:'bus', label:'41', speed:10, count:3, points:[[-2600,540],[-1640,360],[-820,160],[0,0],[420,-720],[840,-1540]] },
-    { id:'bus-43', type:'bus', label:'43', speed:10, count:2, points:[[2400,1680],[1500,980],[660,420],[0,0],[-740,-520],[-1480,-1100]] },
-  ];
-
-  var vehicles = [];
-  routeDefs.forEach(function(route) {
-    var points = route.points.map(function(p) { return offsetPoint(p[0], p[1]); });
-    var length = routeLengthM(points);
-    for (var i = 0; i < route.count; i++) {
-      var progress = (i / route.count + seeded(route.label.charCodeAt(0) + i * 17) * 0.08) % 1;
-      var sampled = pointOnRoute(points, progress);
-      vehicles.push({
-        id:route.id + '-' + (i + 1),
-        type:route.type,
-        label:route.label,
-        routeId:route.id,
-        routePoints:points,
-        routeLengthM:length,
-        progress:progress,
-        direction:i % 2 === 0 ? 1 : -1,
-        speedMps:route.speed * (0.82 + seeded(i + length) * 0.36),
-        lat:sampled.lat,
-        lng:sampled.lng,
-        heading:sampled.heading,
-        priority:route.type === 'train' ? 96 : route.type === 'tram' ? 92 : 82,
-      });
-    }
-  });
-
-  return vehicles.slice(0, ${TRANSIT_COUNT});
-}
-
-function routeLengthM(points) {
-  var length = 0;
-  for (var i = 1; i < points.length; i++) {
-    length += distM(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
-  }
-  return Math.max(1, length);
-}
-
-function pointOnRoute(points, progress) {
-  var routeLength = routeLengthM(points);
-  var target = ((progress % 1) + 1) % 1 * routeLength;
-  var travelled = 0;
-  for (var i = 1; i < points.length; i++) {
-    var from = points[i - 1];
-    var to = points[i];
-    var seg = distM(from.lat, from.lng, to.lat, to.lng);
-    if (travelled + seg >= target) {
-      var t = (target - travelled) / Math.max(1, seg);
-      return {
-        lat: from.lat + (to.lat - from.lat) * t,
-        lng: from.lng + (to.lng - from.lng) * t,
-        heading: Math.atan2(to.lng - from.lng, to.lat - from.lat) * 180 / Math.PI,
-      };
-    }
-    travelled += seg;
-  }
-  var last = points[points.length - 1];
-  var prev = points[points.length - 2] || last;
-  return {
-    lat:last.lat,
-    lng:last.lng,
-    heading:Math.atan2(last.lng - prev.lng, last.lat - prev.lat) * 180 / Math.PI,
-  };
-}
-
 function buildWorldEntities() {
   var labels = [
     ['shop','Market','M',-120,-440,8,20], ['bar','Cafe','C',60,-260,7,23], ['event','Live','!',250,-180,18,24],
@@ -984,7 +1148,6 @@ function buildWorldEntities() {
   });
 }
 
-var TRANSIT = buildTransitEntities();
 var WORLD_ENTITIES = buildWorldEntities();
 var LIVE_EVENTS = [];
 
@@ -1007,10 +1170,6 @@ var SIM_ADAPTERS = {
     name:'mockUsersAdapter',
     snapshot:function() { return SIM.agents.map(function(agent) { return createSnapshotEntity(agent, 'user'); }); },
   },
-  transit: {
-    name:'mockTransitAdapter',
-    snapshot:function() { return TRANSIT.map(function(entity) { return createSnapshotEntity(entity, 'transit'); }); },
-  },
   places: {
     name:'mockPlacesAdapter',
     snapshot:function() { return WORLD_ENTITIES.map(function(entity) { return createSnapshotEntity(entity, 'place'); }); },
@@ -1025,57 +1184,12 @@ function collectLiveSnapshot() {
   var started = performance.now();
   var snapshot = {
     users: SIM_ADAPTERS.users.snapshot(),
-    transit: SIM_ADAPTERS.transit.snapshot(),
     places: SIM_ADAPTERS.places.snapshot(),
     events: SIM_ADAPTERS.events.snapshot(),
   };
   SIM_STATE.adapterMs = performance.now() - started;
   SIM_STATE.lastSnapshotAt = Date.now();
   return snapshot;
-}
-
-function transitEl(entity) {
-  var wrap = document.createElement('div');
-  wrap.className = 'transit-wrap ' + entity.type;
-  wrap.style.zIndex = '900';
-  wrap.style.width = '28px';
-  wrap.style.height = '28px';
-  wrap.style.display = 'flex';
-  wrap.style.alignItems = 'center';
-  wrap.style.justifyContent = 'center';
-  var core = document.createElement('div');
-  core.className = 'transit-core';
-  core.style.fontSize = entity.type === 'tram' ? '20px' : '18px';
-  core.style.lineHeight = '1';
-  core.style.transformOrigin = '50% 50%';
-  core.textContent = entity.type === 'train' ? '🚆' : entity.type === 'tram' ? '🚊' : '🚌';
-  wrap.appendChild(core);
-  return wrap;
-}
-
-function transitScreenEl(entity) {
-  var wrap = document.createElement('div');
-  wrap.className = 'transit-screen ' + entity.type;
-  var core = document.createElement('div');
-  core.className = 'transit-screen-core';
-  core.textContent = entity.type === 'train' ? '🚆' : entity.type === 'tram' ? '🚊' : '🚌';
-  wrap.appendChild(core);
-  return { wrap: wrap, core: core };
-}
-
-function updateTransitScreenPositions() {
-  if (!window.map || !window._transitMarkers) return;
-  Object.keys(window._transitMarkers).forEach(function(id) {
-    var entry = window._transitMarkers[id];
-    if (!entry || !entry.entity || !entry.screen) return;
-    var point = map.project([entry.entity.lng, entry.entity.lat]);
-    var visible = entry.screen.dataset.lod !== '0';
-    entry.screen.style.opacity = visible ? '1' : '0';
-    entry.screen.style.transform = visible
-      ? 'translate(' + (point.x - 14).toFixed(1) + 'px,' + (point.y - 14).toFixed(1) + 'px)'
-      : 'translate(-9999px,-9999px)';
-    if (entry.core) entry.core.style.setProperty('--heading', entry.entity.heading.toFixed(1) + 'deg');
-  });
 }
 
 function worldEntityEl(entity) {
@@ -1142,7 +1256,7 @@ function applyUserStatus(entry, agent) {
   var status = agent.activity && agent.activity.status ? agent.activity.status : 'online';
   var wrap = entry.wrap || entry.el;
   if (!wrap) return;
-  ['status-online','status-moving','status-food','status-social','status-party','status-transit','status-quiet'].forEach(function(cls) {
+  ['status-online','status-moving','status-food','status-social','status-party','status-quiet'].forEach(function(cls) {
     wrap.classList.remove(cls);
   });
   wrap.classList.add('status-' + status);
@@ -1174,19 +1288,17 @@ function runLiveEventEngine(now, dt) {
   var scenario = currentScenario();
   if (Math.random() > scenario.eventRate * dt / 72000) return;
   var roll = Math.random();
-  if (roll < 0.32 && TRANSIT.length) {
-    var t = TRANSIT[Math.floor(Math.random() * TRANSIT.length)];
-    t.delaySec = Math.min(420, (t.delaySec || 0) + 45 + Math.floor(Math.random() * 120));
-    pushLiveEvent('transit-delay', 'Linie ' + t.label + ' verspätet', t.id);
-  } else if (roll < 0.64 && WORLD_ENTITIES.length) {
+  if (roll < 0.5 && WORLD_ENTITIES.length) {
     var p = WORLD_ENTITIES[Math.floor(Math.random() * WORLD_ENTITIES.length)];
     p.state = p.type === 'bar' || p.type === 'food' ? 'happy-hour' : 'event-live';
     p.offer = p.state === 'happy-hour' ? 'Happy Hour' : 'Live';
     p.updatedAt = now;
     updateWorldEntityVisual(window._worldMarkers && window._worldMarkers[p.id]);
     pushLiveEvent('place-pulse', p.label + ' ist aktiv', p.id);
-  } else if (SIM.agents.length) {
-    var u = SIM.agents[Math.floor(Math.random() * SIM.agents.length)];
+  } else {
+    var locals = SIM.agents.filter(function(agent) { return !agent.isFriend; });
+    if (!locals.length) return;
+    var u = locals[Math.floor(Math.random() * locals.length)];
     u.online = true;
     u.activity = weightedActivity(now * 0.002 + u.lat);
     u.updatedAt = now;
@@ -1194,33 +1306,10 @@ function runLiveEventEngine(now, dt) {
   }
 }
 
-function updateTransit(dt) {
-  var scenario = currentScenario();
-  TRANSIT.forEach(function(entity) {
-    var prevLat = entity.lat;
-    var prevLng = entity.lng;
-    var delayFactor = entity.delaySec ? clamp(1 - entity.delaySec / 700, 0.42, 1) : 1;
-    entity.progress += entity.direction * (entity.speedMps * scenario.transitSpeed * delayFactor * dt / 1000) / entity.routeLengthM;
-    entity.delaySec = Math.max(0, (entity.delaySec || 0) - dt / 1000);
-    if (entity.progress > 1) entity.progress -= 1;
-    if (entity.progress < 0) entity.progress += 1;
-    var sampled = pointOnRoute(entity.routePoints, entity.progress);
-    entity.lat = sampled.lat;
-    entity.lng = sampled.lng;
-    entity.heading = entity.direction > 0
-      ? sampled.heading
-      : sampled.heading + 180;
-    if (Math.abs(entity.lat - prevLat) < 0.0000001 && Math.abs(entity.lng - prevLng) < 0.0000001) {
-      entity.heading = sampled.heading;
-    }
-  });
-  updateTransitScreenPositions();
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // MAP SETUP (exact copy from real map)
 // ─────────────────────────────────────────────────────────────────────────────
-var radarSizing = { lat: SIM_LAT, lng: SIM_LNG, radiusM: 500, enabled: true };
+var radarSizing = { lat: SIM_LAT, lng: SIM_LNG, radiusM: ${SIM_CENTER_RADIUS_M}, enabled: true };
 
 function distanceMetersBetween(lat1, lng1, lat2, lng2) {
   var toRad = Math.PI / 180;
@@ -1313,11 +1402,53 @@ var map = new maplibregl.Map({
   attributionControl: false,
 });
 window.map = map;
+var SIM_INITIAL_ZOOM = 14;
+var SIM_DOUBLE_CLICK_ZOOM_DELTA = 1.25;
 setQuality('strong');
 map.dragRotate.disable();
 map.touchZoomRotate.disableRotation();
 map.touchPitch.enable();
-  map.doubleClickZoom.disable();
+map.doubleClickZoom.disable();
+
+function mapPointFromPointerEvent(e) {
+  var source = e && e.point
+    ? e.point
+    : e && e.lngLat && window.map
+      ? map.project(e.lngLat)
+      : null;
+  if (!source) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  return { x: source.x, y: source.y };
+}
+
+function zoomInAt(point) {
+  map.easeTo({
+    zoom: Math.min(map.getMaxZoom(), map.getZoom() + SIM_DOUBLE_CLICK_ZOOM_DELTA),
+    around: map.unproject(point),
+    duration: 220,
+  });
+}
+
+function resetSimZoom() {
+  map.easeTo({ zoom: SIM_INITIAL_ZOOM, duration: 260 });
+}
+
+var simClickState = { count:0, timer:null, lastPoint:null };
+function registerMapTap(e) {
+  var target = e && e.originalEvent && e.originalEvent.target;
+  if (target && target.closest && target.closest('#sim-controls, #recenter, .friend-marker-wrap, .maplibregl-popup')) return;
+  var point = mapPointFromPointerEvent(e);
+  simClickState.count += 1;
+  simClickState.lastPoint = point;
+  if (simClickState.timer) clearTimeout(simClickState.timer);
+  simClickState.timer = setTimeout(function() {
+    var count = simClickState.count;
+    var p = simClickState.lastPoint || point;
+    simClickState.count = 0;
+    simClickState.timer = null;
+    if (count >= 3) resetSimZoom();
+    else if (count === 2) zoomInAt(p);
+  }, 230);
+}
 
 document.getElementById('recenter').addEventListener('click', function(e) {
   e.preventDefault(); e.stopPropagation();
@@ -1326,36 +1457,40 @@ document.getElementById('recenter').addEventListener('click', function(e) {
 map.on('click', function() {
   document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p) { p.classList.remove('visible'); });
   document.querySelectorAll('.friend-marker-wrap.popup-open').forEach(function(w) {
-    w.classList.remove('popup-open'); w.style.zIndex = '2';
+    w.classList.remove('popup-open'); w.style.zIndex = '20';
   });
 });
+map.on('click', registerMapTap);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE MARKERS (identical visual logic to real map)
 // ─────────────────────────────────────────────────────────────────────────────
 map.on('load', function() {
   window._simMarkers = {};
-  window._transitMarkers = {};
   window._worldMarkers = {};
 
-  // "Me" marker
+  // Fixed "Me" overlay: the map center is the simulated user position.
   var meFr = figureEl(true);
   meFr.fig.style.setProperty('--symbol-scale','1');
-  new maplibregl.Marker({ element: meFr.wrap, anchor:'center' })
-    .setLngLat([SIM_LNG, SIM_LAT])
-    .setPopup(new maplibregl.Popup({ closeButton:false, offset:14 }).setHTML(infoSheetHtml('Du','Simulation')))
-    .addTo(map);
+  var meFocus = document.getElementById('sim-me-focus');
+  if (meFocus) meFocus.appendChild(meFr.wrap);
+  window._meMarker = { marker:null, fig:meFr.fig, wrap:meFr.wrap };
+
+  var friendLayer = document.getElementById('friend-layer');
 
   SIM.agents.forEach(function(agent, idx) {
     if (agent.isFriend) {
-      // ── Friend: fig-wrap + name tag (identical to real map) ──────
+      // ── Friend: screen overlay driven by map center radius ──────
       var fr = figureEl(false);
       fr.wrap.className += ' friend-marker-wrap';
+      fr.wrap.id = agent.id;
+      fr.wrap.dataset.id = agent.id;
+      fr.wrap.dataset.name = agent.name;
       var lbl = document.createElement('div');
       lbl.className = 'friend-name-tag';
       lbl.textContent = agent.name;
       fr.wrap.insertBefore(lbl, fr.wrap.firstChild);
-      fr.wrap.style.zIndex = '2';
+      fr.wrap.style.zIndex = '20';
       fr.wrap.style.animationDelay = (idx * 0.048) + 's';
       fr.wrap.classList.add('fig-entering');
       setTimeout(function(w){ w.classList.remove('fig-entering'); w.style.animationDelay=''; }.bind(null, fr.wrap), 620);
@@ -1377,7 +1512,7 @@ map.on('load', function() {
         if (fr.wrap.__lastActivate && now - fr.wrap.__lastActivate < 320) return;
         fr.wrap.__lastActivate = now;
         var visible = popup.classList.contains('visible');
-        document.querySelectorAll('.friend-marker-wrap.popup-open').forEach(function(w){ w.classList.remove('popup-open'); w.style.zIndex='2'; });
+        document.querySelectorAll('.friend-marker-wrap.popup-open').forEach(function(w){ w.classList.remove('popup-open'); w.style.zIndex='20'; });
         document.querySelectorAll('.fig-popup-inner.visible').forEach(function(p){ p.classList.remove('visible'); });
         if (!visible) { fr.wrap.classList.add('popup-open'); fr.wrap.style.zIndex='10000'; popup.classList.add('visible'); }
       };
@@ -1386,9 +1521,8 @@ map.on('load', function() {
         t.addEventListener('click', activate);
       });
 
-      var marker = new maplibregl.Marker({ element:fr.wrap, anchor:'center' })
-        .setLngLat([agent.lng, agent.lat]).addTo(map);
-      window._simMarkers[agent.id] = { marker:marker, fig:fr.fig, wrap:fr.wrap, agent:agent };
+      if (friendLayer) friendLayer.appendChild(fr.wrap);
+      window._simMarkers[agent.id] = { marker:null, fig:fr.fig, wrap:fr.wrap, agent:agent };
       applyUserStatus(window._simMarkers[agent.id], agent);
 
     } else {
@@ -1406,13 +1540,6 @@ map.on('load', function() {
     }
   });
 
-  TRANSIT.forEach(function(entity) {
-    var screen = transitScreenEl(entity);
-    document.getElementById('transit-layer').appendChild(screen.wrap);
-    window._transitMarkers[entity.id] = { wrap:screen.wrap, screen:screen.wrap, core:screen.core, entity:entity };
-  });
-  updateTransitScreenPositions();
-
   WORLD_ENTITIES.forEach(function(entity, idx) {
     var el = worldEntityEl(entity);
     el.style.animationDelay = (idx * 0.08) + 's';
@@ -1424,14 +1551,16 @@ map.on('load', function() {
     updateWorldEntityVisual(window._worldMarkers[entity.id]);
   });
   simSetScenario('day');
+  setSimRadius(simRadiusM);
 
-  map.on('move', function() { updateTransitScreenPositions(); updateLodForAll(); });
-  map.on('zoom', function() { updateTransitScreenPositions(); updateLodForAll(); });
-  map.on('resize', function() { updateTransitScreenPositions(); updateLodForAll(); });
   map.on('dragstart', function() { SIM.setCameraInteracting(true); });
   map.on('movestart', function() { SIM.setCameraInteracting(true); });
+  map.on('move', scheduleLodUpdate);
+  map.on('zoom', scheduleLodUpdate);
+  map.on('resize', scheduleLodUpdate);
   map.on('moveend', function() { SIM.setCameraInteracting(false); updateLodForAll(); });
   updateLodForAll();
+  setTimeout(function() { simRunVisibilityTests(); }, 240);
 
   // Start adaptive simulation tick. Rendering stays map-native; simulation work is budgeted by quality.
   var lastSimFrame = performance.now();
@@ -1467,8 +1596,14 @@ function simChangeSpeed(d) {
   document.getElementById('speed-val').textContent = SPEED_STEPS[speedIdx] + '×';
 }
 
+function simChangeRadius(d) {
+  simRadiusIdx = Math.max(0, Math.min(SIM_RADIUS_STEPS.length - 1, simRadiusIdx + d));
+  setSimRadius(SIM_RADIUS_STEPS[simRadiusIdx]);
+}
+
 function simSetProfile(profile) {
   setQuality(profile);
+  setSimRadius(simRadiusM);
   updateLodForAll();
 }
 
@@ -1486,16 +1621,12 @@ function simSetScenario(name) {
   });
   var hudScenario = document.getElementById('hud-scenario');
   if (hudScenario) hudScenario.textContent = scenario.label;
-  TRANSIT.forEach(function(t, index) {
-    if (name === 'rush' || name === 'event') t.delaySec = 30 + seeded(index * 9.2) * 260;
-    else if (name === 'stress') t.delaySec = seeded(index * 3.4) * 120;
-    else t.delaySec = 0;
-  });
   SIM.agents.forEach(function(agent, index) {
+    if (agent.isFriend) return;
     var activitySeed = index * 18.7 + scenario.timeHour * 10;
     agent.online = name === 'stress' ? true : seeded(activitySeed) > (agent.isFriend ? 0.02 : 0.08);
     if (name === 'night' && seeded(activitySeed + 5) > 0.45) agent.activity = USER_ACTIVITIES[4];
-    else if (name === 'rush' && seeded(activitySeed + 6) > 0.48) agent.activity = USER_ACTIVITIES[5];
+    else if (name === 'rush' && seeded(activitySeed + 6) > 0.48) agent.activity = USER_ACTIVITIES[1];
     else if (name === 'event' && seeded(activitySeed + 7) > 0.38) agent.activity = USER_ACTIVITIES[3];
     else agent.activity = weightedActivity(activitySeed);
     agent.updatedAt = Date.now();
@@ -1554,7 +1685,7 @@ export default function SimulationLabScreen() {
       />
       <View pointerEvents="none" style={[styles.engineBadge, { top: (Platform.OS === "ios" ? insets.top : (StatusBar.currentHeight ?? 0)) + 10 }]}>
         <Text style={styles.engineBadgeTitle}>{SIM_ENGINE_VERSION}</Text>
-        <Text style={styles.engineBadgeText}>FPS · LOD · Transit · Live World Lab</Text>
+        <Text style={styles.engineBadgeText}>FPS · Radius · Live World Lab</Text>
       </View>
     </View>
   );
