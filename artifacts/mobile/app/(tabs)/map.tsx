@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
@@ -31,6 +32,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useLocation } from "@/context/LocationContext";
 import { useProximity } from "@/context/ProximityContext";
 import { supabase } from "@/lib/supabase";
+import { fetchServerPoiTile, type PoiTilePoi } from "@/lib/poiTiles";
 import type { WebView as WebViewType } from "react-native-webview";
 
 const MAP_RADIUS_DEGREES = 0.06; // roughly 6-7km
@@ -40,9 +42,30 @@ const FRIEND_REFRESH_MS = 90000;
 const PRESENCE_HEARTBEAT_MS = 30000;
 const ONLINE_STALE_MINUTES = 2;
 const LIVE_POI_REFRESH_MS = 5 * 60 * 1000;
-const LIVE_POI_RADIUS_METERS = 1800;
-const LIVE_POI_LIMIT = 180;
-const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
+const LIVE_POI_LIMIT = 500;
+const LIVE_POI_CACHE_LIMIT = 20000;
+const CITY_POI_TILE_M = 1400;
+const CITY_POI_TILE_RADIUS = 1;
+const CITY_POI_MAX_TILE_FETCHES_PER_PASS = 9;
+const CITY_POI_PRELOAD_RADIUS = 4;
+const CITY_POI_PRELOAD_BATCH = 4;
+const POI_TILE_REGION_ID = "augsburg";
+const AUGSBURG_POI_BBOX = {
+  south: 48.25,
+  west: 10.72,
+  north: 48.50,
+  east: 11.12,
+};
+const AUGSBURG_POI_CENTER = { lat: 48.3705, lng: 10.8978 };
+const POI_TILE_STORAGE_PREFIX = "locals_poi_tile_v3:";
+const POI_TILE_STORAGE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const FALLBACK_POI_RADIUS_METERS = 1800;
+const MIN_MAP_LOD_RADIUS_M = 500;
+const OVERPASS_ENDPOINTS = [
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
+];
 
 const PARTY_COLORS = {
   fill: Colors.map.partyFill,
@@ -76,6 +99,11 @@ type LivePoi = {
   name: string;
   category: LivePoiCategory;
   poiType?: string;
+};
+
+type PoiTileState = {
+  fetchedAt: number;
+  pois: LivePoi[];
 };
 
 type MapParty = {
@@ -135,6 +163,171 @@ function areLivePoisEqual(a: LivePoi[], b: LivePoi[]): boolean {
     }
   }
   return true;
+}
+
+function distanceMetersApprox(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const avgLat = ((a.lat + b.lat) / 2) * Math.PI / 180;
+  const dLatM = (a.lat - b.lat) * 111320;
+  const dLngM = (a.lng - b.lng) * 111320 * Math.cos(avgLat);
+  return Math.sqrt(dLatM * dLatM + dLngM * dLngM);
+}
+
+function metersPerLngDegree(lat: number): number {
+  return Math.max(1, 111320 * Math.cos(lat * Math.PI / 180));
+}
+
+function poiTileCoord(point: { lat: number; lng: number }): { x: number; y: number } {
+  return {
+    x: Math.floor((point.lng * metersPerLngDegree(point.lat)) / CITY_POI_TILE_M),
+    y: Math.floor((point.lat * 111320) / CITY_POI_TILE_M),
+  };
+}
+
+function poiTileKey(x: number, y: number): string {
+  return `${x}:${y}`;
+}
+
+function poiTileCenter(x: number, y: number, nearLat: number): { lat: number; lng: number } {
+  const lat = ((y + 0.5) * CITY_POI_TILE_M) / 111320;
+  return {
+    lat,
+    lng: ((x + 0.5) * CITY_POI_TILE_M) / metersPerLngDegree(nearLat),
+  };
+}
+
+function poiTileBbox(x: number, y: number, nearLat: number): { south: number; west: number; north: number; east: number } {
+  const south = (y * CITY_POI_TILE_M) / 111320;
+  const north = ((y + 1) * CITY_POI_TILE_M) / 111320;
+  const west = (x * CITY_POI_TILE_M) / metersPerLngDegree(nearLat);
+  const east = ((x + 1) * CITY_POI_TILE_M) / metersPerLngDegree(nearLat);
+  return { south, west, north, east };
+}
+
+function poiTileKeysAround(center: { lat: number; lng: number }, radius = CITY_POI_TILE_RADIUS): string[] {
+  const coord = poiTileCoord(center);
+  const keys: string[] = [];
+  for (let y = coord.y - radius; y <= coord.y + radius; y += 1) {
+    for (let x = coord.x - radius; x <= coord.x + radius; x += 1) {
+      keys.push(poiTileKey(x, y));
+    }
+  }
+  return keys.sort();
+}
+
+function poiTileKeysForBbox(bbox: { south: number; west: number; north: number; east: number }): string[] {
+  const southWest = poiTileCoord({ lat: bbox.south, lng: bbox.west });
+  const northEast = poiTileCoord({ lat: bbox.north, lng: bbox.east });
+  const minX = Math.min(southWest.x, northEast.x);
+  const maxX = Math.max(southWest.x, northEast.x);
+  const minY = Math.min(southWest.y, northEast.y);
+  const maxY = Math.max(southWest.y, northEast.y);
+  const keys: string[] = [];
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      keys.push(poiTileKey(x, y));
+    }
+  }
+  return keys.sort();
+}
+
+function parsePoiTileKey(key: string): { x: number; y: number } | null {
+  const [xRaw, yRaw] = key.split(":");
+  const x = Number(xRaw);
+  const y = Number(yRaw);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function sortPoiTileKeysByDistance(keys: string[], focus: { lat: number; lng: number }): string[] {
+  return [...keys].sort((a, b) => {
+    const tileA = parsePoiTileKey(a);
+    const tileB = parsePoiTileKey(b);
+    if (!tileA || !tileB) return a.localeCompare(b);
+    const centerA = poiTileCenter(tileA.x, tileA.y, focus.lat);
+    const centerB = poiTileCenter(tileB.x, tileB.y, focus.lat);
+    return distanceMetersApprox(centerA, focus) - distanceMetersApprox(centerB, focus);
+  });
+}
+
+function poiTileStorageKey(tileKey: string): string {
+  return `${POI_TILE_STORAGE_PREFIX}${tileKey}`;
+}
+
+async function loadStoredPoiTile(tileKey: string): Promise<PoiTileState | null> {
+  try {
+    const raw = await AsyncStorage.getItem(poiTileStorageKey(tileKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PoiTileState>;
+    if (
+      typeof parsed.fetchedAt !== "number" ||
+      !Array.isArray(parsed.pois) ||
+      Date.now() - parsed.fetchedAt > POI_TILE_STORAGE_TTL_MS
+    ) {
+      return null;
+    }
+    return {
+      fetchedAt: parsed.fetchedAt,
+      pois: parsed.pois.filter((poi): poi is LivePoi =>
+        typeof poi?.id === "string" &&
+        typeof poi.lat === "number" &&
+        typeof poi.lng === "number" &&
+        typeof poi.name === "string" &&
+        typeof poi.category === "string",
+      ),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function saveStoredPoiTile(tileKey: string, tile: PoiTileState): Promise<void> {
+  try {
+    await AsyncStorage.setItem(poiTileStorageKey(tileKey), JSON.stringify(tile));
+  } catch (error) {
+    console.warn("poi tile cache save failed", error);
+  }
+}
+
+function isLivePoiCategory(category: unknown): category is LivePoiCategory {
+  return (
+    category === "transit" ||
+    category === "school" ||
+    category === "worship" ||
+    category === "food" ||
+    category === "shop" ||
+    category === "green"
+  );
+}
+
+function normalizeServerPoiTile(pois: PoiTilePoi[]): LivePoi[] {
+  return pois.filter((poi): poi is LivePoi =>
+    typeof poi?.id === "string" &&
+    typeof poi.lat === "number" &&
+    typeof poi.lng === "number" &&
+    typeof poi.name === "string" &&
+    isLivePoiCategory(poi.category),
+  );
+}
+
+function mergeLivePoiCache(
+  current: LivePoi[],
+  incoming: LivePoi[],
+  focus: { lat: number; lng: number },
+): LivePoi[] {
+  const byId = new Map<string, LivePoi>();
+  [...current, ...incoming].forEach((poi) => {
+    const key = poi.id || `${poi.category}|${poi.name}|${poi.lat.toFixed(5)}|${poi.lng.toFixed(5)}`;
+    byId.set(key, poi);
+  });
+
+  return Array.from(byId.values())
+    .sort((a, b) => {
+      const byDistance = distanceMetersApprox(a, focus) - distanceMetersApprox(b, focus);
+      if (Math.abs(byDistance) > 0.1) return byDistance;
+      return `${a.category}|${a.name}|${a.id}`.localeCompare(`${b.category}|${b.name}|${b.id}`);
+    })
+    .slice(0, LIVE_POI_CACHE_LIMIT)
+    .sort((a, b) => `${a.category}|${a.name}|${a.id}`.localeCompare(`${b.category}|${b.name}|${b.id}`));
 }
 
 function GroupSwipeCard({
@@ -582,27 +775,40 @@ function toLivePoi(element: OverpassElement): LivePoi | null {
   };
 }
 
-function buildFallbackLivePois(homeLocation: { lat: number; lng: number }): LivePoi[] {
-  const seed: Array<Omit<LivePoi, "lat" | "lng"> & { dLat: number; dLng: number }> = [
-    { id: "fallback-park", name: "Pocket Park", category: "green", poiType: "park", dLat: 0.0018, dLng: -0.0012 },
-    { id: "fallback-bus", name: "Market Stop", category: "transit", poiType: "bus_stop", dLat: 0.0011, dLng: 0.0017 },
-    { id: "fallback-cafe", name: "Neon Coffee", category: "food", poiType: "cafe", dLat: 0.00035, dLng: -0.00018 },
-    { id: "fallback-restaurant", name: "Corner Kitchen", category: "food", poiType: "restaurant", dLat: 0.00036, dLng: -0.00015 },
-    { id: "fallback-burger", name: "Late Burger", category: "food", poiType: "fast_food", dLat: 0.00032, dLng: -0.00012 },
-    { id: "fallback-market", name: "Local Market", category: "shop", poiType: "supermarket", dLat: 0.00028, dLng: -0.0002 },
-    { id: "fallback-kiosk", name: "Night Kiosk", category: "shop", poiType: "convenience", dLat: 0.00029, dLng: -0.00016 },
-    { id: "fallback-bakery", name: "Morning Bakery", category: "shop", poiType: "bakery", dLat: 0.00031, dLng: -0.00024 },
-    { id: "fallback-books", name: "Tiny Books", category: "shop", poiType: "books", dLat: 0.00022, dLng: -0.00014 },
-    { id: "fallback-pharmacy", name: "City Pharmacy", category: "shop", poiType: "pharmacy", dLat: -0.00038, dLng: 0.0002 },
-    { id: "fallback-school", name: "Local School", category: "school", poiType: "school", dLat: -0.0015, dLng: 0.001 },
-    { id: "fallback-worship", name: "Neighborhood Church", category: "worship", poiType: "place_of_worship", dLat: -0.0011, dLng: -0.0016 },
+function buildFallbackLivePois(homeLocation: { lat: number; lng: number }, radiusM = 1000): LivePoi[] {
+  const visibleRadiusM = Math.min(FALLBACK_POI_RADIUS_METERS, normalizeMapLodRadius(radiusM) * 0.92);
+  const seed: Array<Omit<LivePoi, "lat" | "lng"> & { xM: number; yM: number }> = [
+    { id: "fallback-cafe", name: "Neon Coffee", category: "food", poiType: "cafe", xM: -70, yM: 90 },
+    { id: "fallback-restaurant", name: "Corner Kitchen", category: "food", poiType: "restaurant", xM: 120, yM: -80 },
+    { id: "fallback-burger", name: "Late Burger", category: "food", poiType: "fast_food", xM: -180, yM: -130 },
+    { id: "fallback-market", name: "Local Market", category: "shop", poiType: "supermarket", xM: 210, yM: 170 },
+    { id: "fallback-kiosk", name: "Night Kiosk", category: "shop", poiType: "convenience", xM: -280, yM: 230 },
+    { id: "fallback-bakery", name: "Morning Bakery", category: "shop", poiType: "bakery", xM: 340, yM: -260 },
+    { id: "fallback-books", name: "Tiny Books", category: "shop", poiType: "books", xM: -390, yM: -340 },
+    { id: "fallback-pharmacy", name: "City Pharmacy", category: "shop", poiType: "pharmacy", xM: 450, yM: 380 },
+    { id: "fallback-bus", name: "Market Stop", category: "transit", poiType: "bus_stop", xM: -520, yM: 80 },
+    { id: "fallback-tram", name: "Central Platform", category: "transit", poiType: "tram_stop", xM: 580, yM: -90 },
+    { id: "fallback-school", name: "Local School", category: "school", poiType: "school", xM: -660, yM: -440 },
+    { id: "fallback-park", name: "Pocket Park", category: "green", poiType: "park", xM: 720, yM: 510 },
+    { id: "fallback-worship", name: "Neighborhood Church", category: "worship", poiType: "place_of_worship", xM: -820, yM: 560 },
+    { id: "fallback-garden", name: "Small Garden", category: "green", poiType: "garden", xM: 900, yM: -620 },
+    { id: "fallback-shop", name: "Corner Shop", category: "shop", poiType: "convenience", xM: -1010, yM: -120 },
+    { id: "fallback-foodhall", name: "Food Hall", category: "food", poiType: "restaurant", xM: 1120, yM: 160 },
+    { id: "fallback-station", name: "North Stop", category: "transit", poiType: "bus_stop", xM: -1220, yM: 680 },
+    { id: "fallback-green", name: "Green Walk", category: "green", poiType: "recreation_ground", xM: 1320, yM: -720 },
   ];
+  const maxSeedDistanceM = seed.reduce(
+    (max, poi) => Math.max(max, Math.sqrt(poi.xM * poi.xM + poi.yM * poi.yM)),
+    1,
+  );
+  const scale = Math.min(1, visibleRadiusM / maxSeedDistanceM);
+  const metersPerLngDegree = Math.max(1, 111320 * Math.cos(homeLocation.lat * Math.PI / 180));
 
   return seed
     .map((poi) => ({
       id: poi.id,
-      lat: homeLocation.lat + poi.dLat,
-      lng: homeLocation.lng + poi.dLng,
+      lat: homeLocation.lat + (poi.yM * scale) / 111320,
+      lng: homeLocation.lng + (poi.xM * scale) / metersPerLngDegree,
       name: poi.name,
       category: poi.category,
       poiType: poi.poiType,
@@ -613,9 +819,17 @@ function buildFallbackLivePois(homeLocation: { lat: number; lng: number }): Live
 function applyFallbackLivePois(
   setLivePois: React.Dispatch<React.SetStateAction<LivePoi[]>>,
   homeLocation: { lat: number; lng: number },
+  radiusM?: number,
 ) {
-  const fallbackPois = buildFallbackLivePois(homeLocation);
-  setLivePois((prev) => (prev.length ? prev : fallbackPois));
+  const fallbackPois = buildFallbackLivePois(homeLocation, radiusM);
+  setLivePois((prev) => {
+    if (prev.length) return prev;
+    return areLivePoisEqual(prev, fallbackPois) ? prev : fallbackPois;
+  });
+}
+
+function normalizeMapLodRadius(radiusM: number | null | undefined): number {
+  return Math.max(MIN_MAP_LOD_RADIUS_M, radiusM ?? 1000);
 }
 
 function computeNightFactor(now: Date): { nightFactor: number; dawnDuskFactor: number } {
@@ -777,7 +991,7 @@ function buildMapHtml(
     .fig {
       position: relative; display: flex; flex-direction: column; align-items: center;
       gap: 1px; cursor: pointer;
-      transform: scale(var(--symbol-scale, 1));
+      transform: scale(var(--symbol-scale, 1)) scale(var(--lod-scale, 1));
       transform-origin: 50% 100%;
       touch-action: manipulation; -webkit-tap-highlight-color: transparent;
     }
@@ -956,6 +1170,10 @@ function buildMapHtml(
     .map-symbol {
       will-change: transform;
     }
+    .map-lod-culled {
+      display: none !important;
+      pointer-events: none !important;
+    }
 	    .friend-name-tag {
 	      padding: 2px 8px;
       border-radius: var(--marker-radius);
@@ -1073,6 +1291,8 @@ function buildMapHtml(
     };
 
     var initialZoom = 14;
+    var poiClusterSplitZoom = initialZoom + 2;
+    var poiClusterRadiusM = 500;
     var baseStyle = {
       version: 8,
       sprite: 'https://tiles.openfreemap.org/sprites/ofm_f384/ofm',
@@ -1095,8 +1315,12 @@ function buildMapHtml(
     };
     var markerRefs = [];
     var poiMarkerEntries = [];
+    var lodMarkerEntries = [];
     var poiVisibilityRaf = null;
+    var mapLodRaf = null;
     var radarSizing = { lat: ${lat}, lng: ${lng}, radiusM: 500, enabled: true };
+    var lodSizing = { radiusM: 1000, enabled: true };
+    var minMapLodRadiusM = ${MIN_MAP_LOD_RADIUS_M};
     window._mapUsersById = {};
 
 	    var map = new maplibregl.Map({
@@ -1156,6 +1380,7 @@ function buildMapHtml(
       });
       markerRefs = [];
       poiMarkerEntries = [];
+      lodMarkerEntries = [];
       if (window._myFigureMarker) {
         try { window._myFigureMarker.marker.remove(); } catch (_) {}
         window._myFigureMarker = null;
@@ -1164,11 +1389,31 @@ function buildMapHtml(
         window.cancelAnimationFrame(poiVisibilityRaf);
         poiVisibilityRaf = null;
       }
+      if (mapLodRaf) {
+        window.cancelAnimationFrame(mapLodRaf);
+        mapLodRaf = null;
+      }
     }
 
     function pushMarker(marker) {
       markerRefs.push(marker);
       return marker;
+    }
+
+    function registerLodEntry(entry) {
+      if (!entry || typeof entry.lat !== 'number' || typeof entry.lng !== 'number') return entry;
+      var root = entry.element || entry.wrap || entry.el;
+      if (root) {
+        for (var i = 0; i < lodMarkerEntries.length; i += 1) {
+          var existingRoot = lodMarkerEntries[i].element || lodMarkerEntries[i].wrap || lodMarkerEntries[i].el;
+          if (existingRoot === root) {
+            Object.assign(lodMarkerEntries[i], entry);
+            return lodMarkerEntries[i];
+          }
+        }
+      }
+      lodMarkerEntries.push(entry);
+      return entry;
     }
 
     function poiCategoryPriority(poi, visual) {
@@ -1217,13 +1462,111 @@ function buildMapHtml(
       return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
+    function getLodFocusPoint() {
+      if (window.map) {
+        var center = map.getCenter();
+        return { lat: center.lat, lng: center.lng };
+      }
+      return { lat: ${lat}, lng: ${lng} };
+    }
+
+    function normalizedLodRadius() {
+      return Math.max(minMapLodRadiusM, Number(lodSizing && lodSizing.radiusM) || 1000);
+    }
+
     function proximityScaleFor(lat, lng) {
-      var radius = Number(radarSizing && radarSizing.radiusM) || 500;
-      if (!radarSizing || !radarSizing.enabled || typeof lat !== 'number' || typeof lng !== 'number') return 1;
-      var distance = distanceMetersBetween(radarSizing.lat, radarSizing.lng, lat, lng);
+      var radius = normalizedLodRadius();
+      if (!lodSizing || !lodSizing.enabled || typeof lat !== 'number' || typeof lng !== 'number') return 1;
+      var center = getLodFocusPoint();
+      var distance = distanceMetersBetween(center.lat, center.lng, lat, lng);
       if (distance <= radius) return 1.34;
       if (distance <= radius * 2) return 1;
       return 0.72;
+    }
+
+    function lodScore(distanceM, zoom) {
+      var radius = normalizedLodRadius();
+      var n = distanceM / radius;
+      if (n >= 1.12) return 0;
+      var t = Math.max(0, 1 - n);
+      var smooth = t * t * (3 - 2 * t);
+      var zBonus = zoom >= 15.2 ? 0.12 : zoom <= 12.2 ? -0.12 : 0;
+      return Math.max(0, Math.min(1, smooth + zBonus));
+    }
+
+    function lodPriorityFor(entry) {
+      if (!entry) return 0;
+      if (entry.kind === 'me') return 120;
+      if (entry.kind === 'party') return 92;
+      if (entry.kind === 'user') return 78;
+      if (entry.kind === 'party-member') return 54;
+      if (entry.kind === 'poi') return entry.priority || 44;
+      return 34;
+    }
+
+    function setMapLodVisibility(entry, visible, score) {
+      var root = entry.element || entry.wrap || entry.el;
+      var visual = entry.visual || entry.badge || entry.fig || root;
+      if (!root || !visual) return false;
+      if (!visible) {
+        root.classList.add('map-lod-culled');
+        root.dataset.lod = '0';
+        return false;
+      }
+      root.classList.remove('map-lod-culled');
+      root.dataset.lod = '1';
+      var displayScore = Math.max(0.06, score || 0);
+      var lodScale = Math.min(1.12, 0.55 + displayScore * 0.57);
+      var opacity = Math.min(1, 0.28 + displayScore * 0.92);
+      root.style.opacity = opacity.toFixed(3);
+      if (entry.fig) {
+        entry.fig.style.setProperty('--lod-scale', lodScale.toFixed(3));
+      } else if (typeof entry.baseSize === 'number') {
+        applyMarkerSize(visual, entry.baseSize, lodScale);
+        if (entry.badge) {
+          entry.size = visual.__poiSize || visual.__baseVisualSize || Math.round(entry.baseSize * lodScale);
+          entry.badge.__poiSize = entry.size;
+        }
+      }
+      return true;
+    }
+
+    function updateMapLodForAll() {
+      if (!window.map || !lodMarkerEntries.length) return;
+      var center = getLodFocusPoint();
+      var radius = normalizedLodRadius();
+      var zoom = map.getZoom();
+      lodMarkerEntries = lodMarkerEntries.filter(function(entry) {
+        var root = entry && (entry.element || entry.wrap || entry.el);
+        return !!(root && root.isConnected);
+      });
+      var candidates = [];
+      lodMarkerEntries.forEach(function(entry) {
+        if (!entry || typeof entry.lat !== 'number' || typeof entry.lng !== 'number') return;
+        var distance = distanceMetersBetween(center.lat, center.lng, entry.lat, entry.lng);
+        var score = lodScore(distance, zoom);
+        var priority = lodPriorityFor(entry);
+        candidates.push({
+          entry: entry,
+          distanceM: distance,
+          score: score,
+          sortVal: score * (1 + priority * 0.004) + (entry._lodVisible ? 0.04 : 0)
+        });
+      });
+      candidates.sort(function(a, b) { return b.sortVal - a.sortVal; });
+      candidates.forEach(function(item) {
+        var insideRadius = item.distanceM <= radius;
+        item.entry._lodVisible = setMapLodVisibility(item.entry, insideRadius, insideRadius ? item.score : 0);
+      });
+      schedulePoiMarkerVisibilityUpdate();
+    }
+
+    function scheduleMapLodUpdate() {
+      if (mapLodRaf) window.cancelAnimationFrame(mapLodRaf);
+      mapLodRaf = window.requestAnimationFrame(function() {
+        mapLodRaf = null;
+        updateMapLodForAll();
+      });
     }
 
     function applyMarkerSize(element, baseSize, scale) {
@@ -1287,6 +1630,10 @@ function buildMapHtml(
       var height = container ? container.clientHeight : 0;
 
       poiMarkerEntries.forEach(function(entry) {
+        if (entry._lodVisible === false) {
+          entry.element.style.display = 'none';
+          return;
+        }
         var point = map.project([entry.poi.lng, entry.poi.lat]);
         var margin = 42;
         var visibleOnScreen =
@@ -2004,12 +2351,70 @@ function buildMapHtml(
         .filter(function(poi) {
           return typeof poi.lat === 'number' && typeof poi.lng === 'number';
         })
+        .map(function(poi) {
+          var base = styles[poi.category] || styles.shop;
+          var visual = resolvePoiVisual(poi, base);
+          return Object.assign({}, poi, {
+            __visual: visual,
+            __visualKey: String((poi.category || 'poi') + '|' + visual.icon + '|' + visual.subtitle)
+          });
+        })
         .sort(function(a, b) {
           return String(a.category + '|' + a.name + '|' + a.id)
             .localeCompare(String(b.category + '|' + b.name + '|' + b.id));
         });
+
+      function buildZoomPoiClusters(sourcePois) {
+        if (map.getZoom() >= poiClusterSplitZoom) return sourcePois;
+        var byVisual = {};
+        sourcePois.forEach(function(poi) {
+          var key = poi.__visualKey || String(poi.category || 'poi');
+          if (!byVisual[key]) byVisual[key] = [];
+          byVisual[key].push(poi);
+        });
+
+        var output = [];
+        Object.keys(byVisual).forEach(function(visualKey) {
+          var groupPois = byVisual[visualKey].slice();
+          var used = new Set();
+          groupPois.forEach(function(seed, seedIndex) {
+            if (used.has(seedIndex)) return;
+            var members = [];
+            groupPois.forEach(function(candidate, candidateIndex) {
+              if (used.has(candidateIndex)) return;
+              if (distanceMetersBetween(seed.lat, seed.lng, candidate.lat, candidate.lng) <= poiClusterRadiusM) {
+                members.push({ poi: candidate, index: candidateIndex });
+              }
+            });
+            if (members.length >= 3) {
+              members.forEach(function(member) { used.add(member.index); });
+              var avgLat = members.reduce(function(sum, member) { return sum + member.poi.lat; }, 0) / members.length;
+              var avgLng = members.reduce(function(sum, member) { return sum + member.poi.lng; }, 0) / members.length;
+              var first = members[0].poi;
+              output.push(Object.assign({}, first, {
+                id: 'cluster-' + visualKey + '-' + avgLat.toFixed(4) + '-' + avgLng.toFixed(4),
+                lat: avgLat,
+                lng: avgLng,
+                name: members.length + ' ' + (first.__visual && first.__visual.subtitle ? first.__visual.subtitle : first.name),
+                __clusterMembers: members.map(function(member) { return member.poi; }),
+                __clusterCount: members.length,
+                __visual: first.__visual,
+                __visualKey: visualKey
+              }));
+            } else {
+              members.forEach(function(member) {
+                used.add(member.index);
+                output.push(member.poi);
+              });
+            }
+          });
+        });
+        return output;
+      }
+
+      var renderPois = buildZoomPoiClusters(validPois);
       var poiClusters = {};
-      validPois.forEach(function(poi) {
+      renderPois.forEach(function(poi) {
         var key = poiClusterKey(poi);
         if (!poiClusters[key]) poiClusters[key] = [];
         poiClusters[key].push(poi);
@@ -2026,44 +2431,48 @@ function buildMapHtml(
           });
       });
 
-      validPois.forEach(function(poi) {
+      renderPois.forEach(function(poi) {
         if (typeof poi.lat !== 'number' || typeof poi.lng !== 'number') return;
         var base = styles[poi.category] || styles.shop;
-        var category = resolvePoiVisual(poi, base);
+        var category = poi.__visual || resolvePoiVisual(poi, base);
         var stableKey = String(poi.category + '|' + poi.name + '|' + poi.id);
         var poiScale = proximityScaleFor(poi.lat, poi.lng);
+        var baseSize = poi.__clusterCount >= 3 ? 46 : 28;
         var poiEl = poiMarkerEl(
-          28,
+          baseSize,
           'linear-gradient(135deg, rgba(0,0,0,0.96) 0%, rgba(6,10,16,0.98) 100%)',
           category.border,
           category.shadow + ', 0 0 0 1px rgba(0,0,0,0.92) inset',
-          '<span style="font-size:15px; line-height:1;">' + category.icon + '</span>'
+          '<span style="font-size:' + (poi.__clusterCount >= 3 ? 23 : 15) + 'px; line-height:1;">' + category.icon + '</span>'
         );
         poiEl.style.cursor = 'pointer';
         poiEl.__poiBadge.__collisionPriority = poiCategoryPriority(poi, category);
-        var poiSize = applyMarkerSize(poiEl.__poiBadge, 28, poiScale);
+        var poiSize = applyMarkerSize(poiEl.__poiBadge, baseSize, poiScale);
         poiEl.__poiSize = poiSize;
         poiEl.__poiBadge.__poiSize = poiSize;
 
         var poiMarker = pushMarker(new maplibregl.Marker({ element: poiEl, anchor: 'center', pitchAlignment: 'viewport', rotationAlignment: 'viewport' })
           .setLngLat([poi.lng, poi.lat])
           .setPopup(new maplibregl.Popup({ closeButton: false, offset: 10 }).setHTML(
-            infoSheetHtml(poi.name || 'POI', category.subtitle, category.icon)
+            infoSheetHtml(poi.name || 'POI', poi.__clusterCount >= 3 ? poi.__clusterCount + ' Symbole in 500m' : category.subtitle, category.icon)
           ))
           .addTo(map));
-        poiMarkerEntries.push({
+        var poiEntry = {
           marker: poiMarker,
           element: poiEl,
+          visual: poiEl.__poiBadge,
           badge: poiEl.__poiBadge,
           connector: poiEl.__poiConnector,
           originDot: poiEl.__poiOriginDot,
           size: poiEl.__poiSize,
           poi: poi,
           offsetIndex: poi.__offsetIndex || 0,
-          clusterSize: poi.__clusterSize || 1,
+          clusterSize: poi.__clusterCount || poi.__clusterSize || 1,
           stableKey: stableKey,
           priority: poiCategoryPriority(poi, category)
-        });
+        };
+        poiMarkerEntries.push(poiEntry);
+        registerLodEntry(Object.assign(poiEntry, { lat: poi.lat, lng: poi.lng, baseSize: baseSize, kind: 'poi' }));
       });
       schedulePoiMarkerVisibilityUpdate();
       window.setTimeout(schedulePoiMarkerVisibilityUpdate, 120);
@@ -2159,6 +2568,7 @@ function buildMapHtml(
             )
           ))
           .addTo(map));
+        registerLodEntry({ element: partyEl, visual: partyEl, lat: party.lat, lng: party.lng, baseSize: 32, kind: 'party' });
 
         party.members.forEach(function(m) {
           var mEl = markerEl(
@@ -2177,6 +2587,7 @@ function buildMapHtml(
             ))
             .addTo(map));
           partyMemberMarkers.push({ partyId: party.id, element: mEl });
+          registerLodEntry({ element: mEl, visual: mEl, lat: m.lat, lng: m.lng, baseSize: 13, kind: 'party-member' });
         });
       });
 
@@ -2241,6 +2652,7 @@ function buildMapHtml(
             existing.marker.setLngLat([u.lng, u.lat]);
             setFigureState(existing.fig, motion.speed, motion.heading);
             applyFigureScale(existing.fig, u.lat, u.lng);
+            registerLodEntry({ element: existing.wrap, visual: existing.fig, fig: existing.fig, lat: u.lat, lng: u.lng, kind: 'user' });
             return;
           }
           var fr = figureEl(false);
@@ -2260,6 +2672,7 @@ function buildMapHtml(
           var fMarker = new maplibregl.Marker({ element: fr.wrap, anchor: 'center' })
             .setLngLat([u.lng, u.lat])
             .addTo(map);
+          registerLodEntry({ element: fr.wrap, visual: fr.fig, fig: fr.fig, lat: u.lat, lng: u.lng, kind: 'user' });
           var inlinePopup = document.createElement('div');
           inlinePopup.className = 'fig-popup-inner';
           var pName = document.createElement('span');
@@ -2349,6 +2762,7 @@ function buildMapHtml(
             infoSheetHtml(u.name || 'Local', subtitle, '🧑', u.id, avatarSrc)
           ))
           .addTo(map));
+        registerLodEntry({ element: el, visual: el, lat: u.lat, lng: u.lng, baseSize: showDatingMarker ? 28 : circleSize, kind: 'user' });
       });
 
       // Stale Figuren-Marker entfernen
@@ -2389,6 +2803,7 @@ function buildMapHtml(
           .setLngLat([myLng, myLat])
           .setPopup(new maplibregl.Popup({ closeButton: false, offset: 11 }).setHTML(infoSheetHtml('Du', mePopupText, '📍')))
           .addTo(map));
+        registerLodEntry({ element: meEl, visual: meEl, lat: myLat, lng: myLng, baseSize: 42, kind: 'me' });
       } else {
         if (!window._myFigureMarker) {
           var meFr = figureEl(true);
@@ -2417,32 +2832,57 @@ function buildMapHtml(
           window._myFigureMarker.marker.setLngLat([myLng, myLat]);
           window._myFigureMarker.fig.style.setProperty('--symbol-scale', '1');
         }
+        if (window._myFigureMarker) {
+          registerLodEntry({ element: window._myFigureMarker.wrap, visual: window._myFigureMarker.fig, fig: window._myFigureMarker.fig, lat: myLat, lng: myLng, kind: 'me' });
+        }
       }
     }
 
     function renderMapLayersAndMarkers() {
 	      clearMarkers();
+      window._poiClusterMode = map.getZoom() < poiClusterSplitZoom;
       var currentFilter = window._mapFilter || 'all';
-	      var hidePois = currentFilter === 'people' || currentFilter === 'friends' || currentFilter === 'dating';
+      var hidePois = currentFilter === 'people';
 
 	      addStyledBuildings();
 	      add3DBuildings();
-	      if (!hidePois) addLivePoiMarkers();
+      if (!hidePois) addLivePoiMarkers();
       addPartyAndMemberMarkers();
       addUserMarkers();
       addMyMarker();
       scheduleFriendLabelLayout();
+      scheduleMapLodUpdate();
+      window.setTimeout(scheduleMapLodUpdate, 120);
+      window.setTimeout(scheduleMapLodUpdate, 420);
     }
 
     map.on('style.load', function() {
       renderMapLayersAndMarkers();
       map.once('idle', schedulePoiMarkerVisibilityUpdate);
+      map.once('idle', scheduleMapLodUpdate);
     });
 
+    map.on('move', scheduleMapLodUpdate);
+    map.on('zoom', scheduleMapLodUpdate);
+    map.on('pitch', scheduleMapLodUpdate);
     map.on('zoomend', schedulePoiMarkerVisibilityUpdate);
     map.on('pitchend', schedulePoiMarkerVisibilityUpdate);
     map.on('resize', schedulePoiMarkerVisibilityUpdate);
     map.on('resize', scheduleFriendLabelLayout);
+    map.on('moveend', scheduleMapLodUpdate);
+    map.on('zoomend', scheduleMapLodUpdate);
+    map.on('pitchend', scheduleMapLodUpdate);
+    map.on('zoomend', function() {
+      var nextClusterMode = map.getZoom() < poiClusterSplitZoom;
+      if (window._poiClusterMode !== nextClusterMode) {
+        window._poiClusterMode = nextClusterMode;
+        renderMapLayersAndMarkers();
+      }
+    });
+    map.on('moveend', function() {
+      var center = map.getCenter();
+      postNativeMessage({ type: 'map_center', lat: center.lat, lng: center.lng });
+    });
 
     map.on('error', function(errorEvent) {
       var msg = errorEvent && errorEvent.error && errorEvent.error.message
@@ -2461,6 +2901,7 @@ function buildMapHtml(
     window._myFigureMarker = null;
     window._myCurrentPos = { lat: ${lat}, lng: ${lng} };
     window._ownMarkerPos = { lat: ${lat}, lng: ${lng} };
+    window._poiClusterMode = null;
 
     window.updateMapData = function(users, pois, parties, filter, presence, motionData, sizingData, ownPosition) {
       window._mapUsers = users || [];
@@ -2479,11 +2920,16 @@ function buildMapHtml(
           radiusM: Number(sizingData.radiusM) || 500,
           enabled: sizingData.enabled !== false,
         };
+        lodSizing = {
+          radiusM: Math.max(minMapLodRadiusM, Number(sizingData.lodRadiusM) || 1000),
+          enabled: sizingData.lodEnabled !== false,
+        };
       }
       if (window.map && window.map.isStyleLoaded()) {
         renderMapLayersAndMarkers();
         schedulePoiMarkerVisibilityUpdate();
       }
+      postNativeMessage({ type: 'map_poi_stats', count: window._mapPois.length });
     };
 
     window.updateMyFigure = function(speed, heading, lat, lng) {
@@ -2557,6 +3003,13 @@ export default function MapScreen() {
   const webViewRef = useRef<WebViewType>(null);
   const injectMapDataRef = useRef<(() => void) | null>(null);
   const prevGpsRef = useRef<{ lat: number; lon: number; time: number } | null>(null);
+  const lastLivePoiFetchRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
+  const overpassEndpointIndexRef = useRef(Math.floor(Date.now() / 60000) % OVERPASS_ENDPOINTS.length);
+  const livePoiRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const poiTileCacheRef = useRef<Map<string, PoiTileState>>(new Map());
+  const poiTileLoadingRef = useRef<Set<string>>(new Set());
+  const cityPoiPreloadKeyRef = useRef<string | null>(null);
+  const poiTileCacheStatsRef = useRef({ memory: 0, disk: 0, network: 0 });
   const mySpeedRef = useRef<number>(0);
   const myHeadingRef = useRef<number | null>(null);
   const prevRadarIdsRef = useRef<Set<string>>(new Set());
@@ -2652,6 +3105,7 @@ export default function MapScreen() {
   const [presenceMenuOpen, setPresenceMenuOpen] = useState(false);
   const [activeUsers, setActiveUsers] = useState<MapUser[]>([]);
   const [livePois, setLivePois] = useState<LivePoi[]>([]);
+  const [poiQueryCenter, setPoiQueryCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [friendshipByUser, setFriendshipByUser] = useState<Record<string, FriendshipState>>({});
   const [isMapActive, setIsMapActive] = useState(false);
   const partyPanelAnim = useRef(new Animated.Value(0)).current;
@@ -2811,7 +3265,9 @@ export default function MapScreen() {
   }, [user]);
 
   const fetchActiveUsers = useCallback(async () => {
-    const origin = myLiveLocation
+    const origin = poiQueryCenter
+      ? { lat: poiQueryCenter.lat, lng: poiQueryCenter.lng }
+      : myLiveLocation
       ? { lat: myLiveLocation.lat, lng: myLiveLocation.lon }
       : null;
 
@@ -2871,55 +3327,114 @@ export default function MapScreen() {
 
     mapped.sort((a, b) => a.id.localeCompare(b.id));
     setActiveUsers((prev) => (areMapUsersEqual(prev, mapped) ? prev : mapped));
-  }, [friendshipByUser, myLiveLocation, user]);
+  }, [friendshipByUser, myLiveLocation, poiQueryCenter, user]);
 
-  const fetchLivePois = useCallback(async () => {
-    if (!homeLocation) {
-      setLivePois([]);
+  const refreshLivePoisFromTiles = useCallback((focus: { lat: number; lng: number }) => {
+    const keys = poiTileKeysAround(focus, CITY_POI_TILE_RADIUS + 1);
+    const pois = keys.flatMap((key) => poiTileCacheRef.current.get(key)?.pois ?? []);
+    setLivePois((prev) => {
+      const merged = mergeLivePoiCache([], pois, focus);
+      return areLivePoisEqual(prev, merged) ? prev : merged;
+    });
+  }, []);
+
+  const fetchPoiTile = useCallback(async (tileKey: string, focus: { lat: number; lng: number }) => {
+    if (poiTileCacheRef.current.has(tileKey) || poiTileLoadingRef.current.has(tileKey)) {
+      if (poiTileCacheRef.current.has(tileKey)) poiTileCacheStatsRef.current.memory += 1;
+      return;
+    }
+    const tile = parsePoiTileKey(tileKey);
+    if (!tile) return;
+    const queryCenter = poiTileCenter(tile.x, tile.y, focus.lat);
+    const bbox = poiTileBbox(tile.x, tile.y, focus.lat);
+
+    const storedTile = await loadStoredPoiTile(tileKey);
+    if (storedTile) {
+      poiTileCacheRef.current.set(tileKey, storedTile);
+      poiTileCacheStatsRef.current.disk += 1;
+      refreshLivePoisFromTiles(focus);
       return;
     }
 
-    const query = `[out:json][timeout:25];
-(
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[shop];
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[amenity~"school|university|college|kindergarten|bus_station|bus_stop|place_of_worship|cafe|restaurant|fast_food|bar"];
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[public_transport=platform];
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[highway=bus_stop];
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[railway~"tram_stop|station"];
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[leisure~"park|garden|nature_reserve|recreation_ground"];
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[landuse~"grass|meadow|forest|village_green"];
-  node(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[natural=wood];
+    poiTileLoadingRef.current.add(tileKey);
+    try {
+      const serverTile = await fetchServerPoiTile(POI_TILE_REGION_ID, tileKey);
+      if (serverTile) {
+        const tileState = {
+          fetchedAt: Date.parse(serverTile.fetchedAt) || Date.now(),
+          pois: normalizeServerPoiTile(serverTile.pois),
+        };
+        poiTileCacheRef.current.set(tileKey, tileState);
+        poiTileCacheStatsRef.current.network += 1;
+        void saveStoredPoiTile(tileKey, tileState);
+        refreshLivePoisFromTiles(focus);
+        return;
+      }
+    } catch (error) {
+      console.debug("[MapPOI] server tile unavailable", tileKey, error);
+    }
 
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[shop];
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[amenity~"school|university|college|kindergarten|bus_station|place_of_worship|cafe|restaurant|fast_food|bar"];
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[public_transport=platform];
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[highway=bus_stop];
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[railway~"tram_stop|station"];
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[leisure~"park|garden|nature_reserve|recreation_ground"];
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[landuse~"grass|meadow|forest|village_green"];
-  way(around:${LIVE_POI_RADIUS_METERS},${homeLocation.lat},${homeLocation.lng})[natural=wood];
+    const bboxArgs = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
+
+    const query = `[out:json][timeout:18];
+(
+  nwr(${bboxArgs})[shop];
+  nwr(${bboxArgs})[amenity~"school|university|college|kindergarten|bus_station|bus_stop|place_of_worship|cafe|restaurant|fast_food|bar"];
+  nwr(${bboxArgs})[public_transport=platform];
+  nwr(${bboxArgs})[highway=bus_stop];
+  nwr(${bboxArgs})[railway~"tram_stop|station"];
+  nwr(${bboxArgs})[leisure~"park|garden|nature_reserve|recreation_ground"];
+  nwr(${bboxArgs})[landuse~"grass|meadow|forest|village_green"];
+  nwr(${bboxArgs})[natural=wood];
 );
-out center tags ${LIVE_POI_LIMIT};`;
+out body center ${LIVE_POI_LIMIT};`;
 
     try {
-      const response = await fetch(OVERPASS_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
-        body: `data=${encodeURIComponent(query)}`,
-      });
+      let response: Response | null = null;
+      let lastFailure: { status?: number; endpoint: string; message?: string } | null = null;
+      const startIndex = overpassEndpointIndexRef.current;
 
-      if (!response.ok) {
-        console.warn("live poi fetch failed", response.status);
-        applyFallbackLivePois(setLivePois, homeLocation);
+      for (let attempt = 0; attempt < OVERPASS_ENDPOINTS.length; attempt += 1) {
+        const endpointIndex = (startIndex + attempt) % OVERPASS_ENDPOINTS.length;
+        const endpoint = OVERPASS_ENDPOINTS[endpointIndex];
+        try {
+          const candidate = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "User-Agent": "Local-Connect Mobile POI Fallback",
+            },
+            body: `data=${encodeURIComponent(query)}`,
+          });
+          if (candidate.ok) {
+            response = candidate;
+            overpassEndpointIndexRef.current = endpointIndex + 1;
+            break;
+          }
+          lastFailure = { status: candidate.status, endpoint };
+          if (candidate.status !== 429 && candidate.status !== 504 && candidate.status < 500) break;
+        } catch (endpointError) {
+          lastFailure = {
+            endpoint,
+            message: endpointError instanceof Error ? endpointError.message : String(endpointError),
+          };
+        }
+      }
+
+      if (!response) {
+        overpassEndpointIndexRef.current = startIndex + 1;
+        console.debug(
+          "[MapPOI] tile fetch skipped",
+          lastFailure?.status ?? lastFailure?.message ?? "unknown",
+          lastFailure?.endpoint ?? "",
+        );
         return;
       }
 
       const payload = (await response.json()) as { elements?: OverpassElement[] };
-      const raw = payload.elements ?? [];
-
       const seen = new Set<string>();
       const parsed: LivePoi[] = [];
-      raw.forEach((el) => {
+      (payload.elements ?? []).forEach((el) => {
         const poi = toLivePoi(el);
         if (!poi) return;
         const key = `${poi.category}|${poi.name}|${poi.lat.toFixed(5)}|${poi.lng.toFixed(5)}`;
@@ -2927,23 +3442,94 @@ out center tags ${LIVE_POI_LIMIT};`;
         seen.add(key);
         parsed.push(poi);
       });
-      const greens = parsed.filter((poi) => poi.category === "green");
-      const nonGreens = parsed.filter((poi) => poi.category !== "green");
-      const next = [...greens, ...nonGreens]
-        .slice(0, LIVE_POI_LIMIT)
+      const pois = parsed
         .sort((a, b) =>
+          distanceMetersApprox(a, queryCenter) - distanceMetersApprox(b, queryCenter) ||
           `${a.category}|${a.name}|${a.id}`.localeCompare(`${b.category}|${b.name}|${b.id}`),
-        );
-      if (!next.length) {
-        applyFallbackLivePois(setLivePois, homeLocation);
-        return;
-      }
-      setLivePois((prev) => (areLivePoisEqual(prev, next) ? prev : next));
+        )
+        .slice(0, LIVE_POI_LIMIT);
+      const tileState = { fetchedAt: Date.now(), pois };
+      poiTileCacheRef.current.set(tileKey, tileState);
+      poiTileCacheStatsRef.current.network += 1;
+      void saveStoredPoiTile(tileKey, tileState);
+      refreshLivePoisFromTiles(focus);
     } catch (error) {
-      console.warn("live poi fetch exception", error);
-      applyFallbackLivePois(setLivePois, homeLocation);
+      console.debug("[MapPOI] tile fetch exception", error);
+    } finally {
+      poiTileLoadingRef.current.delete(tileKey);
     }
-  }, [homeLocation]);
+  }, [refreshLivePoisFromTiles]);
+
+  const preloadCityPoiCache = useCallback(async (centers: Array<{ lat: number; lng: number }>) => {
+    if (!centers.length) return;
+    const primaryFocus = centers[0];
+    const keySet = new Set<string>();
+    centers.forEach((center) => {
+      poiTileKeysAround(center, CITY_POI_PRELOAD_RADIUS).forEach((key) => keySet.add(key));
+    });
+    poiTileKeysForBbox(AUGSBURG_POI_BBOX).forEach((key) => keySet.add(key));
+    const keys = sortPoiTileKeysByDistance(Array.from(keySet), primaryFocus).filter(
+      (key) => !poiTileCacheRef.current.has(key),
+    );
+
+    console.debug("[MapPOI] preload tiles", keys.length);
+    refreshLivePoisFromTiles(primaryFocus);
+    for (let i = 0; i < keys.length; i += CITY_POI_PRELOAD_BATCH) {
+      const batch = keys.slice(i, i + CITY_POI_PRELOAD_BATCH);
+      await Promise.all(batch.map((key) => fetchPoiTile(key, primaryFocus)));
+      refreshLivePoisFromTiles(primaryFocus);
+    }
+    console.debug("[MapPOI] tile cache", poiTileCacheStatsRef.current);
+  }, [fetchPoiTile, refreshLivePoisFromTiles]);
+
+  const fetchLivePois = useCallback(async () => {
+    const queryCenter = poiQueryCenter ?? homeLocation;
+    if (!queryCenter) {
+      setLivePois([]);
+      return;
+    }
+
+    if (livePoiRetryTimerRef.current) {
+      clearTimeout(livePoiRetryTimerRef.current);
+      livePoiRetryTimerRef.current = null;
+    }
+    lastLivePoiFetchRef.current = { ...queryCenter, time: Date.now() };
+    refreshLivePoisFromTiles(queryCenter);
+    const keys = sortPoiTileKeysByDistance(poiTileKeysAround(queryCenter), queryCenter);
+    const missingKeys = keys.filter((key) => !poiTileCacheRef.current.has(key));
+    if (!missingKeys.length && !livePois.length) {
+      applyFallbackLivePois(setLivePois, queryCenter, radarSettings.lodRadiusM);
+    }
+    await Promise.all(
+      missingKeys
+        .slice(0, CITY_POI_MAX_TILE_FETCHES_PER_PASS)
+        .map((key) => fetchPoiTile(key, queryCenter)),
+    );
+  }, [fetchPoiTile, homeLocation, livePois.length, poiQueryCenter, radarSettings.lodRadiusM, refreshLivePoisFromTiles]);
+
+  useEffect(() => {
+    return () => {
+      if (livePoiRetryTimerRef.current) {
+        clearTimeout(livePoiRetryTimerRef.current);
+        livePoiRetryTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user || !homeLocation) return;
+    const centers: Array<{ lat: number; lng: number }> = [];
+    if (myLiveLocation) centers.push({ lat: myLiveLocation.lat, lng: myLiveLocation.lon });
+    centers.push({ lat: homeLocation.lat, lng: homeLocation.lng });
+    centers.push(AUGSBURG_POI_CENTER);
+    const preloadKey = [
+      user.id,
+      ...centers.map((center) => `${center.lat.toFixed(3)},${center.lng.toFixed(3)}`),
+    ].join("|");
+    if (cityPoiPreloadKeyRef.current === preloadKey) return;
+    cityPoiPreloadKeyRef.current = preloadKey;
+    void preloadCityPoiCache(centers);
+  }, [homeLocation, myLiveLocation, preloadCityPoiCache, user]);
 
   useEffect(() => {
     if (!user || !myLiveLocation || !isMapActive) return;
@@ -2958,7 +3544,7 @@ out center tags ${LIVE_POI_LIMIT};`;
   }, [isMapActive, myLiveLocation, setOwnPresenceOffline, upsertOwnPresence, user]);
 
   useEffect(() => {
-    if (!user || !myLiveLocation || !isMapActive) {
+    if (!user || !isMapActive || (!myLiveLocation && !poiQueryCenter)) {
       return;
     }
 
@@ -2969,7 +3555,7 @@ out center tags ${LIVE_POI_LIMIT};`;
     }, MAP_REFRESH_MS);
 
     return () => clearInterval(interval);
-  }, [fetchActiveUsers, isMapActive, myLiveLocation, user]);
+  }, [fetchActiveUsers, isMapActive, myLiveLocation, poiQueryCenter, user]);
 
   useEffect(() => {
     if (!user || !isMapActive) return;
@@ -3157,11 +3743,13 @@ out center tags ${LIVE_POI_LIMIT};`;
       lat: radarOriginLat,
       lng: radarOriginLng,
       radiusM: radarSettings.radiusM,
+      lodRadiusM: normalizeMapLodRadius(radarSettings.lodRadiusM),
       enabled: radarSettings.enabled && radarOriginLat != null && radarOriginLng != null,
+      lodEnabled: true,
     };
     const script = `(function(){if(window.updateMapData)window.updateMapData(${JSON.stringify(visibleUsers)},${JSON.stringify(livePois)},${JSON.stringify(allParties)},${JSON.stringify(filterMode)},${JSON.stringify(presenceMode)},${JSON.stringify({})},${JSON.stringify(sizingData)},${JSON.stringify(ownPosition)});})();true;`;
     webViewRef.current.injectJavaScript(script);
-  }, [visibleUsers, livePois, allParties, filterMode, presenceMode, myLiveLocation, homeLocation, radarSettings.enabled, radarSettings.radiusM]);
+  }, [visibleUsers, livePois, allParties, filterMode, presenceMode, myLiveLocation, homeLocation, radarSettings.enabled, radarSettings.radiusM, radarSettings.lodRadiusM]);
 
   useEffect(() => {
     injectMapDataRef.current = injectMapData;
@@ -3190,6 +3778,22 @@ out center tags ${LIVE_POI_LIMIT};`;
       }
       if (data.type === "map_error") {
         console.warn("[MapWebView]", data.message ?? "Unbekannter Fehler");
+        return;
+      }
+      if (data.type === "map_poi_stats") {
+        console.debug("[MapWebView] POIs", data.count ?? 0);
+        return;
+      }
+      if (data.type === "map_center" && typeof data.lat === "number" && typeof data.lng === "number") {
+        setPoiQueryCenter((prev) => {
+          if (prev) {
+            const dLat = data.lat - prev.lat;
+            const dLng = data.lng - prev.lng;
+            const movedMeters = Math.sqrt(dLat * dLat + dLng * dLng) * 111320;
+            if (movedMeters < 250) return prev;
+          }
+          return { lat: data.lat, lng: data.lng };
+        });
       }
     } catch (_) {}
   }, []);
@@ -3248,7 +3852,9 @@ out center tags ${LIVE_POI_LIMIT};`;
         lat: radarOriginLat,
         lng: radarOriginLng,
         radiusM: radarSettings.radiusM,
+        lodRadiusM: normalizeMapLodRadius(radarSettings.lodRadiusM),
         enabled: radarSettings.enabled,
+        lodEnabled: true,
       };
       const ownPosition = myLiveLocation ? { lat: myLiveLocation.lat, lng: myLiveLocation.lon } : null;
       webViewRef.current.injectJavaScript(
@@ -3275,7 +3881,7 @@ out center tags ${LIVE_POI_LIMIT};`;
     setCreateComposerMode(null);
     setShowPartyComposer(false);
   }, [effectivePresenceMode, homeLocation, partyName, partyAddress, selectedPartyMembers, createParty,
-      currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode, myLiveLocation, radarSettings.enabled, radarSettings.radiusM]);
+      currentUser, allParties, visibleUsers, livePois, filterMode, presenceMode, myLiveLocation, radarSettings.enabled, radarSettings.radiusM, radarSettings.lodRadiusM]);
 
   const handleCreateGroup = useCallback(() => {
     if (effectivePresenceMode === "home") {

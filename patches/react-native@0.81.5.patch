@@ -1,0 +1,26 @@
+diff --git a/Libraries/AppDelegate/RCTAppSetupUtils.mm b/Libraries/AppDelegate/RCTAppSetupUtils.mm
+index 2ffbbd03e5842b516b735450d8cc2c5ad71c1b6a..61aff460f3d4e4bcc3896f0d41463c4793a904ae 100644
+--- a/Libraries/AppDelegate/RCTAppSetupUtils.mm
++++ b/Libraries/AppDelegate/RCTAppSetupUtils.mm
+@@ -106,12 +106,15 @@ void RCTAppSetupPrepareApp(UIApplication *application, BOOL turboModuleEnabled)
+         initWithHandlersProvider:^NSArray<id<RCTURLRequestHandler>> *(RCTModuleRegistry *moduleRegistry) {
+           NSArray *URLRequestHandlerModules =
+               extractModuleConformingToProtocol(moduleRegistry, @protocol(RCTURLRequestHandler));
+-          return [@[
+-            [RCTHTTPRequestHandler new],
+-            [RCTDataRequestHandler new],
+-            [RCTFileRequestHandler new],
+-            [moduleRegistry moduleForName:"BlobModule"],
+-          ] arrayByAddingObjectsFromArray:URLRequestHandlerModules];
++          NSMutableArray<id<RCTURLRequestHandler>> *defaultHandlers = [NSMutableArray new];
++          [defaultHandlers addObject:[RCTHTTPRequestHandler new]];
++          [defaultHandlers addObject:[RCTDataRequestHandler new]];
++          [defaultHandlers addObject:[RCTFileRequestHandler new]];
++          id blobModule = [moduleRegistry moduleForName:"BlobModule"];
++          if (blobModule) {
++            [defaultHandlers addObject:blobModule];
++          }
++          return [defaultHandlers arrayByAddingObjectsFromArray:URLRequestHandlerModules];
+         }];
+   }
+   // No custom initializer here.

@@ -1,6 +1,6 @@
 # Codex Handoff
 
-Stand: 2026-05-28
+Stand: 2026-07-09
 
 ## Wichtigster Kontext
 
@@ -22,9 +22,26 @@ Der User möchte iterativ im Simulator testen und Features direkt weiterentwicke
 
 ## Aktueller Fokus
 
-Swipe-to-Reply im Messenger ist überarbeitet und gebaut. Nächste sinnvolle Schritte:
-- Chat-Migration in Supabase ausführen: `supabase/migrations/20260528090000_chat_reliability_security.sql`
-- Weitere Messenger-Features nach Bedarf
+Map/POI-Performance: Augsburg und Umgebung sind jetzt serverseitig als POI-Tile-Cache befuellt.
+
+### POI Cache Stand
+
+- Neue Supabase-Migration: `supabase/migrations/20260709060000_poi_tiles.sql`
+- Neue API-Route: `artifacts/api-server/src/routes/poi.ts`
+- Mobile API-Client: `artifacts/mobile/lib/poiTiles.ts`
+- Importer: `scripts/src/build-poi-tiles.ts`
+- Augsburg Cache: 399 Tiles, 21.579 POI-Eintraege, 2 leere Rand-Tiles.
+- API-Test erfolgreich: `/api/poi/tiles/augsburg/575:3846` liefert 494 POIs.
+- Map lädt POIs: Device-Cache -> API-Tile -> Overpass-Fallback.
+- Mobile Cache-Key: `locals_poi_tile_v3:`.
+
+### Naechste wichtige Schritte fuer andere Staedte
+
+1. Region-Erkennung aus GPS/Home-Adresse.
+2. Dynamische `regionId` statt festem `augsburg`.
+3. Backend Auto-Provisioning fuer noch nicht gecachte Staedte.
+4. Background Worker fuer POI-Import, niemals Stadtimport auf dem Handy.
+5. Refresh/TTL/Versionierung fuer bestehende Stadt-Tiles, z.B. alle 7-14 Tage.
 
 ## Zuletzt erledigt (2026-06-10) — Session 8
 

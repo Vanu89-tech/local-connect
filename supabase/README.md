@@ -33,6 +33,8 @@ Without the CLI, paste the migration SQL into the Supabase SQL editor.
 - `parties`: active and historical parties
 - `party_members`: invited/joined party members
 - `map_presence`: live map location/status for Realtime
+- `poi_regions`: city/area definitions for server-side POI tile caches
+- `poi_tiles`: versioned POI JSON tiles used by the mobile map before Overpass fallback
 
 ## Auth Model
 
@@ -53,3 +55,20 @@ Authorization: Bearer <supabase-access-token>
 
 For now, read endpoints such as `/api/posts` stay public while `/api/me` and
 write endpoints require a valid Supabase session.
+
+## POI Tile Cache
+
+The mobile map uses small POI tiles instead of querying Overpass directly for a
+whole city. Apply migrations, then fill the Augsburg cache with:
+
+```bash
+pnpm --dir scripts build:poi-tiles
+```
+
+Required env vars:
+
+- `EXPO_PUBLIC_SUPABASE_URL` or `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+The app first reads its device cache, then `/api/poi/tiles/augsburg/:tileKey`,
+and only falls back to Overpass while a server tile is still missing.

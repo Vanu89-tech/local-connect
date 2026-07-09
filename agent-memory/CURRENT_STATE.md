@@ -1,6 +1,6 @@
 # Current State
 
-Stand: 2026-05-28
+Stand: 2026-07-09
 
 ## Kurzfassung
 
@@ -20,6 +20,25 @@ Der User arbeitet auf Deutsch und testet meistens im iPhone Simulator. **DER ein
 - Mobile App: `/Users/razvan/Desktop/Local-Connect/artifacts/mobile`
 - Supabase Migrationen: `/Users/razvan/Desktop/Local-Connect/supabase/migrations`
 - Shared Agent Memory: `/Users/razvan/Desktop/Local-Connect/agent-memory`
+
+## POI-/Map-Cache Stand
+
+- Augsburg und Umgebung sind als serverseitiger POI-Tile-Cache vorbereitet.
+- Supabase-Tabellen: `poi_regions`, `poi_tiles`.
+- Region-ID aktuell: `augsburg`.
+- Cache-Befuellung erfolgreich abgeschlossen: 399 Tiles, 21.579 POI-Eintraege, 2 leere Rand-Tiles.
+- API-Route: `/api/poi/tiles/:regionId/:tileKey`.
+- Mobile Map lädt POIs in dieser Reihenfolge: Device-Cache -> API-Server-Tile -> Overpass-Fallback.
+- Lokaler Mobile-POI-Cache-Key wurde auf `locals_poi_tile_v3:` gesetzt, damit alte/unvollstaendige v2-Tiles ignoriert werden.
+- API-Server fuer lokale Tests: `pnpm --dir /Users/razvan/Desktop/Local-Connect/artifacts/api-server dev` auf Port 3000.
+
+## Wichtige naechste Schritte: POI-Cache fuer jede Stadt
+
+1. Region-Erkennung: Aus GPS/Home-Adresse bestimmen, in welcher Stadt/Region der User ist.
+2. Dynamische Region-ID: Mobile darf nicht fest `augsburg` verwenden, sondern muss die passende `poi_regions.id` anhand der Position aus API/Supabase laden.
+3. Backend Auto-Provisioning: Wenn eine Stadt noch keinen Cache hat, Region anlegen, Tiles berechnen, Import-Job starten und der App waehrenddessen teilweise/leere Tiles liefern.
+4. Background Jobs: POI-Import darf nicht auf dem Handy laufen; ein Server/Worker baut neue Stadt-Tiles im Hintergrund.
+5. Refresh-Mechanik: Bestehende Stadt-Tiles regelmaessig aktualisieren, z.B. alle 7-14 Tage, mit Versionierung/TTL.
 
 ## Aktueller App-Stand
 
@@ -115,21 +134,29 @@ pnpm exec expo start --dev-client --host localhost
 <!-- APP_SYNC_STATUS_START -->
 ## Letzter Sync
 
-- Timestamp UTC: 20260707T021639Z
+- Timestamp UTC: 20260709T063856Z
 - Projekt: Local-Connect
 - Branch: master
-- Commit vor Sync: b04f6fc
-- Lokale Änderungen vor Memory-Update: 7
-- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260707T021639Z
+- Commit vor Sync: 5056621
+- Lokale Änderungen vor Memory-Update: 15
+- Snapshot-Ziel: /Users/razvan/Documents/Local-Connect-sync-state/snapshots/20260709T063856Z
 - Hinweis: Dieser Block wird automatisch von /sync aktualisiert.
 
 ### Geänderte Dateien vor Sync
 
-- ` M artifacts/mobile/app/(tabs)/index.tsx`
+- ` M agent-memory/CODEX_HANDOFF.md`
+- ` M agent-memory/CURRENT_STATE.md`
+- ` M artifacts/api-server/src/routes/index.ts`
 - ` M artifacts/mobile/app/(tabs)/map.tsx`
-- ` M artifacts/mobile/app/(tabs)/simulation-lab.tsx`
-- ` M artifacts/mobile/components/RadarOverlay.tsx`
-- ` M artifacts/mobile/context/AppContext.tsx`
+- ` M artifacts/mobile/app/radar-settings.tsx`
 - ` M artifacts/mobile/context/ProximityContext.tsx`
-- `?? supabase/migrations/20260707012000_profile_direct_messages.sql`
+- ` M package.json`
+- ` M pnpm-lock.yaml`
+- ` M scripts/package.json`
+- ` M supabase/README.md`
+- `?? artifacts/api-server/src/routes/poi.ts`
+- `?? artifacts/mobile/lib/poiTiles.ts`
+- `?? patches/`
+- `?? scripts/src/build-poi-tiles.ts`
+- `?? supabase/migrations/20260709060000_poi_tiles.sql`
 <!-- APP_SYNC_STATUS_END -->

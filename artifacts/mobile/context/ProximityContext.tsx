@@ -29,6 +29,7 @@ import { supabase } from '@/lib/supabase';
 const STORAGE_KEY     = 'locals_radar_v1';
 const MIN_DIST_M      = 50;      // GPS-Update nur wenn ≥50m bewegt
 const MIN_INTERVAL_MS = 30_000;  // maximal alle 30s
+const MIN_MAP_LOD_RADIUS_M = 500;
 
 // Cooldown-Zeiten: innerhalb dieser Zeitspanne keine erneute Benachrichtigung
 const COOLDOWN: Record<string, number> = {
@@ -41,6 +42,7 @@ const COOLDOWN: Record<string, number> = {
 // ─── Typen ─────────────────────────────────────────────────────────────────────
 export type RadarSettings = {
   radiusM:    number;           // 200–2000 Meter
+  lodRadiusM: number;           // Sichtbarer Symbolradius um den Kartenmittelpunkt
   visibility: RadarVisibility;  // 'public' | 'friends' | 'hidden'
   intent:     RadarIntent;      // 'active' | 'date' | 'hangout'
   enabled:    boolean;
@@ -48,10 +50,19 @@ export type RadarSettings = {
 
 const DEFAULT_SETTINGS: RadarSettings = {
   radiusM:    500,
+  lodRadiusM: 1000,
   visibility: 'public',
   intent:     'active',
   enabled:    true,
 };
+
+function normalizeRadarSettings(settings: Partial<RadarSettings>): Partial<RadarSettings> {
+  if (typeof settings.lodRadiusM !== 'number') return settings;
+  return {
+    ...settings,
+    lodRadiusM: Math.max(MIN_MAP_LOD_RADIUS_M, settings.lodRadiusM),
+  };
+}
 
 type ProximityContextType = {
   nearbyUsers:          NearbyEntity[];
@@ -97,14 +108,14 @@ export function ProximityProvider({ children }: { children: React.ReactNode }) {
       if (!raw) return;
       try {
         const saved = JSON.parse(raw) as Partial<RadarSettings>;
-        setRadarSettings((prev) => ({ ...prev, ...saved }));
+        setRadarSettings((prev) => ({ ...prev, ...normalizeRadarSettings(saved) }));
       } catch (_) {}
     });
   }, []);
 
   const updateRadarSettings = useCallback(async (patch: Partial<RadarSettings>) => {
     setRadarSettings((prev) => {
-      const next = { ...prev, ...patch };
+      const next = { ...prev, ...normalizeRadarSettings(patch) };
       settingsRef.current = next;
       AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       return next;

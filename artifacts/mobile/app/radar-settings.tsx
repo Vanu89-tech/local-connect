@@ -15,6 +15,7 @@ import { RadarIntent, RadarVisibility } from '@/lib/proximity';
 import { useProximity } from '@/context/ProximityContext';
 
 const RADIUS_STEPS = [200, 300, 500, 750, 1000, 1500, 2000];
+const LOD_RADIUS_STEPS = [500, 750, 1000, 1500, 2000, 3000, 5000];
 
 const VISIBILITY_OPTIONS: { value: RadarVisibility; label: string; desc: string; icon: string }[] = [
   { value: 'public',  label: 'Öffentlich', desc: 'Alle können dich sehen',      icon: 'globe' },
@@ -31,9 +32,14 @@ const INTENT_OPTIONS: { value: RadarIntent; label: string; desc: string; icon: s
 export default function RadarSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { radarSettings, updateRadarSettings, triggerProximityCheck } = useProximity();
+  const activeLodRadiusM = Math.max(500, radarSettings.lodRadiusM ?? 1000);
 
   const handleRadiusChange = async (m: number) => {
     await updateRadarSettings({ radiusM: m });
+  };
+
+  const handleLodRadiusChange = async (m: number) => {
+    await updateRadarSettings({ lodRadiusM: m });
   };
 
   const handleVisibilityChange = async (v: RadarVisibility) => {
@@ -111,6 +117,29 @@ export default function RadarSettingsScreen() {
           </View>
           <Text style={styles.hint}>
             Größerer Radius = mehr Treffer, mehr Batterieverbrauch
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>LOD-Radius</Text>
+          <View style={styles.chipRow}>
+            {LOD_RADIUS_STEPS.map((m) => {
+              const active = activeLodRadiusM === m;
+              return (
+                <Pressable
+                  key={m}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => handleLodRadiusChange(m)}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {m < 1000 ? `${m}m` : `${m / 1000}km`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.hint}>
+            Steuert, welche Kartensymbole um den unsichtbaren Kartenmittelpunkt sichtbar bleiben
           </Text>
         </View>
 
